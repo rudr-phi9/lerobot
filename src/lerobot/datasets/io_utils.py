@@ -29,7 +29,7 @@ from PIL import Image as PILImage
 from torchvision import transforms
 
 from lerobot.utils.io_utils import load_json, write_json
-from lerobot.utils.utils import SuppressProgressBars
+from lerobot.utils.utils import SuppressProgressBars, flatten_dict, unflatten_dict
 
 from .utils import (
     DEFAULT_DATA_FILE_SIZE_IN_MB,
@@ -39,9 +39,7 @@ from .utils import (
     EPISODES_DIR,
     INFO_PATH,
     STATS_PATH,
-    flatten_dict,
     serialize_dict,
-    unflatten_dict,
 )
 
 

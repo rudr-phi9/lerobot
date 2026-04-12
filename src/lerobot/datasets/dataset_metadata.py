@@ -25,6 +25,7 @@ from huggingface_hub import snapshot_download
 
 from lerobot.utils.constants import DEFAULT_FEATURES, HF_LEROBOT_HOME, HF_LEROBOT_HUB_CACHE
 from lerobot.utils.feature_utils import _validate_feature_names
+from lerobot.utils.utils import flatten_dict
 
 from .compute_stats import aggregate_stats
 from .feature_utils import create_empty_dataset_info
@@ -44,7 +45,6 @@ from .utils import (
     DEFAULT_EPISODES_PATH,
     INFO_PATH,
     check_version_compatibility,
-    flatten_dict,
     get_safe_version,
     has_legacy_hub_download_metadata,
     is_valid_version,
