@@ -16,20 +16,37 @@
 
 """SARM Processor for encoding images/text and generating stage+tau targets."""
 
+from __future__ import annotations
+
 import random
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pandas as pd
 import torch
-from faker import Faker
 from PIL import Image
 
-from lerobot.utils.import_utils import require_package
+from lerobot.utils.import_utils import (
+    _faker_available,
+    _pandas_available,
+    _transformers_available,
+    require_package,
+)
 
-require_package("transformers", extra="sarm")
+if TYPE_CHECKING or _transformers_available:
+    from transformers import CLIPModel, CLIPProcessor
+else:
+    CLIPModel = None  # type: ignore[assignment, misc]
+    CLIPProcessor = None  # type: ignore[assignment, misc]
 
-from transformers import CLIPModel, CLIPProcessor
+if TYPE_CHECKING or _pandas_available:
+    import pandas as pd
+else:
+    pd = None  # type: ignore[assignment]
+
+if TYPE_CHECKING or _faker_available:
+    from faker import Faker
+else:
+    Faker = None  # type: ignore[assignment, misc]
 
 from lerobot.configs import FeatureType, PipelineFeatureType, PolicyFeature
 from lerobot.processor import (
@@ -65,6 +82,9 @@ class SARMEncodingProcessorStep(ProcessorStep):
         dataset_meta=None,
         dataset_stats: dict | None = None,
     ):
+        require_package("transformers", extra="sarm")
+        require_package("faker", extra="sarm")
+        require_package("pandas", extra="dataset")
         super().__init__()
         self.config = config
         self.image_key = image_key or config.image_key

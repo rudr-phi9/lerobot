@@ -19,12 +19,12 @@
 import pytest
 import torch
 
-from lerobot.configs.types import FeatureType, PolicyFeature, RTCAttentionSchedule  # noqa: E402
-from lerobot.policies.factory import make_pre_post_processors  # noqa: E402
-from lerobot.policies.rtc.configuration_rtc import RTCConfig  # noqa: E402
+from lerobot.configs.types import FeatureType, PolicyFeature, RTCAttentionSchedule
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.rtc.configuration_rtc import RTCConfig
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig  # noqa: F401
-from lerobot.utils.random_utils import set_seed  # noqa: E402
-from tests.utils import require_cuda, skip_if_package_missing  # noqa: E402
+from lerobot.utils.random_utils import set_seed
+from tests.utils import require_cuda, skip_if_package_missing
 
 
 @skip_if_package_missing("transformers")

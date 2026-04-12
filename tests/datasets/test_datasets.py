@@ -21,6 +21,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from huggingface_hub import HfApi
 from PIL import Image
 from safetensors.torch import load_file

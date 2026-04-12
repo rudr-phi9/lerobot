@@ -20,6 +20,9 @@ import time
 
 import pytest
 import torch
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from torch.multiprocessing import Event, Queue
 
 from lerobot.configs.train import TrainRLServerPipelineConfig

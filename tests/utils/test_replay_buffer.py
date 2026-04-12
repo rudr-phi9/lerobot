@@ -20,6 +20,7 @@ from collections.abc import Callable
 import pytest
 
 pytest.importorskip("grpc")
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 
 import torch  # noqa: E402
 

@@ -108,16 +108,25 @@ _diffusers_available = is_package_available("diffusers")
 _torchdiffeq_available = is_package_available("torchdiffeq")
 
 # Hardware SDKs
+_serial_available = is_package_available("pyserial", import_name="serial")
+_deepdiff_available = is_package_available("deepdiff")
 _dynamixel_sdk_available = is_package_available("dynamixel-sdk", import_name="dynamixel_sdk")
 _feetech_sdk_available = is_package_available("feetech-servo-sdk", import_name="scservo_sdk")
 _reachy2_sdk_available = is_package_available("reachy2_sdk")
 _can_available = is_package_available("python-can", "can")
 _unitree_sdk_available = is_package_available("unitree-sdk2py", "unitree_sdk2py")
 
+# Data / serialization
+_pandas_available = is_package_available("pandas")
+_faker_available = is_package_available("faker")
+
 # Misc
 _pynput_available = is_package_available("pynput")
 _pygame_available = is_package_available("pygame")
 _qwen_vl_utils_available = is_package_available("qwen-vl-utils", import_name="qwen_vl_utils")
+_wallx_deps_available = (
+    _transformers_available and _peft_available and _torchdiffeq_available and _qwen_vl_utils_available
+)
 
 
 def make_device_from_device_class(config: ChoiceRegistry) -> Any:

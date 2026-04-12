@@ -19,6 +19,9 @@ from unittest.mock import patch
 
 import pytest
 import torch
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from torch.multiprocessing import Event, Queue
 
 from lerobot.utils.constants import OBS_STR

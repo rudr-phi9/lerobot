@@ -51,10 +51,7 @@ from torch.nn import CrossEntropyLoss
 
 from lerobot.utils.constants import ACTION, OBS_STATE
 from lerobot.utils.import_utils import (
-    _peft_available,
-    _qwen_vl_utils_available,
-    _torchdiffeq_available,
-    _transformers_available,
+    _wallx_deps_available,
     require_package,
 )
 
@@ -70,10 +67,6 @@ from .constant import (
     PRIORITY_ORDER,
     RESOLUTION,
     TOKENIZER_MAX_LENGTH,
-)
-
-_wallx_deps_available = (
-    _transformers_available and _peft_available and _torchdiffeq_available and _qwen_vl_utils_available
 )
 
 if TYPE_CHECKING or _wallx_deps_available:

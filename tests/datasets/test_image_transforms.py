@@ -21,6 +21,8 @@ from safetensors.torch import load_file
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F  # noqa: N812
 
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from lerobot.scripts.lerobot_imgtransform_viz import (
     save_all_transforms,
     save_each_transform,

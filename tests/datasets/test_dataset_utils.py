@@ -16,7 +16,10 @@
 
 import pytest
 import torch
-from datasets import Dataset
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
+from datasets import Dataset  # noqa: E402
 from huggingface_hub import DatasetCard
 
 from lerobot.datasets.io_utils import hf_transform_to_torch

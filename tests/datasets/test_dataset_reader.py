@@ -15,6 +15,10 @@
 # limitations under the License.
 """Contract tests for DatasetReader."""
 
+import pytest
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from lerobot.datasets.dataset_reader import DatasetReader
 from lerobot.utils.import_utils import get_safe_default_codec
 

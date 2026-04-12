@@ -20,6 +20,9 @@ from pathlib import Path
 import einops
 import pytest
 import torch
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from packaging import version
 from safetensors.torch import load_file
 
