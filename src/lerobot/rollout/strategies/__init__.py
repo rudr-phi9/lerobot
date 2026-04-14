@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import abc
+import time
 from typing import TYPE_CHECKING
 
 import torch
@@ -25,6 +26,7 @@ from lerobot.policies.rtc import ActionInterpolator
 from lerobot.policies.utils import make_robot_action
 from lerobot.utils.constants import OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
+from lerobot.utils.robot_utils import precise_sleep
 
 if TYPE_CHECKING:
     from lerobot.rollout.configs import RolloutStrategyConfig
@@ -42,6 +44,68 @@ class RolloutStrategy(abc.ABC):
 
     def __init__(self, config: RolloutStrategyConfig) -> None:
         self.config = config
+        self._engine: InferenceEngine | None = None
+        self._interpolator: ActionInterpolator | None = None
+        self._warmup_flushed: bool = False
+
+    def _init_engine(self, ctx: RolloutContext) -> None:
+        """Create and start the inference engine and action interpolator.
+
+        Call this from ``setup()`` to avoid duplicating the engine
+        construction across every strategy.
+        """
+        from lerobot.rollout.inference import InferenceEngine
+
+        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
+        self._engine = InferenceEngine(
+            policy=ctx.policy,
+            preprocessor=ctx.preprocessor,
+            postprocessor=ctx.postprocessor,
+            robot_wrapper=ctx.robot_wrapper,
+            rtc_config=ctx.cfg.rtc,
+            hw_features=ctx.hw_features,
+            action_keys=ctx.action_keys,
+            task=ctx.cfg.task,
+            fps=ctx.cfg.fps,
+            device=ctx.cfg.device,
+            use_torch_compile=ctx.cfg.use_torch_compile,
+            compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
+        )
+        self._engine.start()
+        self._warmup_flushed = False
+
+    def _handle_warmup(self, use_torch_compile: bool, loop_start: float, control_interval: float) -> bool:
+        """Handle torch.compile warmup phase.
+
+        Returns ``True`` if the caller should ``continue`` (still warming
+        up).  On the first post-warmup iteration the engine and
+        interpolator are reset so stale warmup state is discarded.
+        """
+        engine = self._engine
+        interpolator = self._interpolator
+        if not use_torch_compile:
+            return False
+        if not engine.compile_warmup_done.is_set():
+            dt = time.perf_counter() - loop_start
+            if (sleep_t := control_interval - dt) > 0:
+                precise_sleep(sleep_t)
+            return True
+        if not self._warmup_flushed:
+            engine.reset()
+            interpolator.reset()
+            self._warmup_flushed = True
+            if engine.is_rtc:
+                engine.resume()
+        return False
+
+    def _teardown_hardware(self, ctx: RolloutContext) -> None:
+        """Stop the inference engine and disconnect hardware."""
+        if self._engine is not None:
+            self._engine.stop()
+        if ctx.robot.is_connected:
+            ctx.robot.disconnect()
+        if ctx.teleop is not None and ctx.teleop.is_connected:
+            ctx.teleop.disconnect()
 
     @abc.abstractmethod
     def setup(self, ctx: RolloutContext) -> None:

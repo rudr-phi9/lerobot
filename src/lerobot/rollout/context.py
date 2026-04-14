@@ -177,7 +177,7 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
         k: v for k, v in all_obs_features.items() if v is float or isinstance(v, tuple)
     }
 
-    action_features_hw = {k: v for k, v in robot.action_features.items() if k.endswith(".pos")}
+    action_features_hw = robot.action_features
 
     # Build dataset features
     dataset_features = combine_feature_dicts(
@@ -196,7 +196,7 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
     hw_features = hw_to_dataset_features(observation_features_hw, "observation")
 
     # Action keys
-    action_keys = [k for k in robot.action_features if k.endswith(".pos")]
+    action_keys = list(robot.action_features.keys())
 
     # Ordered action keys (reconcile policy vs dataset ordering)
     policy_action_names = getattr(policy_config, "action_feature_names", None)

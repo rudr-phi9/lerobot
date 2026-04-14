@@ -22,14 +22,12 @@ import time
 from threading import Event as ThreadingEvent
 
 from lerobot.datasets import VideoEncodingManager
-from lerobot.policies.rtc import ActionInterpolator
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..configs import HighlightStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine
 from ..ring_buffer import RolloutRingBuffer
 from . import RolloutStrategy, infer_action
 
@@ -54,31 +52,14 @@ class HighlightStrategy(RolloutStrategy):
 
     def __init__(self, config: HighlightStrategyConfig):
         super().__init__(config)
-        self._engine: InferenceEngine | None = None
-        self._interpolator: ActionInterpolator | None = None
         self._ring: RolloutRingBuffer | None = None
         self._listener = None
         self._save_requested = ThreadingEvent()
         self._recording_live = ThreadingEvent()
+        self._shutdown_event: ThreadingEvent | None = None
 
     def setup(self, ctx: RolloutContext) -> None:
-        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
-
-        self._engine = InferenceEngine(
-            policy=ctx.policy,
-            preprocessor=ctx.preprocessor,
-            postprocessor=ctx.postprocessor,
-            robot_wrapper=ctx.robot_wrapper,
-            rtc_config=ctx.cfg.rtc,
-            hw_features=ctx.hw_features,
-            action_keys=ctx.action_keys,
-            task=ctx.cfg.task,
-            fps=ctx.cfg.fps,
-            device=ctx.cfg.device,
-            use_torch_compile=ctx.cfg.use_torch_compile,
-            compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
-        )
-        self._engine.start()
+        self._init_engine(ctx)
 
         self._ring = RolloutRingBuffer(
             max_seconds=self.config.ring_buffer_seconds,
@@ -86,6 +67,7 @@ class HighlightStrategy(RolloutStrategy):
             fps=ctx.cfg.fps,
         )
 
+        self._shutdown_event = ctx.shutdown_event
         self._setup_keyboard()
         logger.info(
             "Highlight strategy ready (buffer=%.0fs, key='%s')",
@@ -109,7 +91,6 @@ class HighlightStrategy(RolloutStrategy):
             engine.resume()
 
         start_time = time.perf_counter()
-        warmup_flushed = False
         task_str = cfg.dataset.single_task if cfg.dataset else cfg.task
 
         with VideoEncodingManager(dataset):
@@ -126,18 +107,8 @@ class HighlightStrategy(RolloutStrategy):
                     if engine.is_rtc:
                         engine.update_observation(obs_processed)
 
-                    if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                        dt = time.perf_counter() - loop_start
-                        if (sleep_t := control_interval - dt) > 0:
-                            precise_sleep(sleep_t)
+                    if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                         continue
-
-                    if cfg.use_torch_compile and not warmup_flushed:
-                        engine.reset()
-                        interpolator.reset()
-                        warmup_flushed = True
-                        if engine.is_rtc:
-                            engine.resume()
 
                     action_dict = infer_action(
                         engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
@@ -186,8 +157,6 @@ class HighlightStrategy(RolloutStrategy):
                         dataset.save_episode()
 
     def teardown(self, ctx: RolloutContext) -> None:
-        if self._engine is not None:
-            self._engine.stop()
         if self._listener is not None:
             self._listener.stop()
 
@@ -199,10 +168,7 @@ class HighlightStrategy(RolloutStrategy):
                     private=ctx.cfg.dataset.private,
                 )
 
-        if ctx.robot.is_connected:
-            ctx.robot.disconnect()
-        if ctx.teleop is not None and ctx.teleop.is_connected:
-            ctx.teleop.disconnect()
+        self._teardown_hardware(ctx)
         logger.info("Highlight strategy teardown complete")
 
     def _setup_keyboard(self) -> None:
@@ -224,6 +190,8 @@ class HighlightStrategy(RolloutStrategy):
                         self._save_requested.set()
                     elif key == keyboard.Key.esc:
                         self._save_requested.clear()
+                        if self._shutdown_event is not None:
+                            self._shutdown_event.set()
 
             self._listener = keyboard.Listener(on_press=on_press)
             self._listener.start()

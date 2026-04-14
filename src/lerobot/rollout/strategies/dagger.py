@@ -38,8 +38,8 @@ import numpy as np
 
 from lerobot.common.control_utils import is_headless
 from lerobot.datasets import VideoEncodingManager
-from lerobot.policies.rtc import ActionInterpolator
 from lerobot.processor import RobotProcessorPipeline
+from lerobot.teleoperators import Teleoperator
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
@@ -47,7 +47,7 @@ from lerobot.utils.utils import log_say
 
 from ..configs import DAggerStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine
+from ..robot_wrapper import ThreadSafeRobot
 from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
@@ -58,21 +58,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _teleop_has_motor_control(teleop) -> bool:
+def _teleop_has_motor_control(teleop: Teleoperator) -> bool:
     return all(hasattr(teleop, attr) for attr in ("enable_torque", "disable_torque", "write_goal_positions"))
 
 
-def _teleop_disable_torque(teleop) -> None:
+def _teleop_disable_torque(teleop: Teleoperator) -> None:
     if hasattr(teleop, "disable_torque"):
         teleop.disable_torque()
 
 
-def _teleop_enable_torque(teleop) -> None:
+def _teleop_enable_torque(teleop: Teleoperator) -> None:
     if hasattr(teleop, "enable_torque"):
         teleop.enable_torque()
 
 
-def _teleop_smooth_move_to(teleop, target_pos: dict, duration_s: float = 2.0, fps: int = 50) -> None:
+def _teleop_smooth_move_to(
+    teleop: Teleoperator, target_pos: dict, duration_s: float = 2.0, fps: int = 50
+) -> None:
     """Smoothly move teleop to target position if motor control is available."""
     if not _teleop_has_motor_control(teleop):
         logger.warning("Teleop does not support motor control — cannot mirror robot position")
@@ -95,8 +97,8 @@ def _teleop_smooth_move_to(teleop, target_pos: dict, duration_s: float = 2.0, fp
 
 
 def _reset_loop(
-    robot,
-    teleop,
+    robot: ThreadSafeRobot,
+    teleop: Teleoperator,
     events: dict,
     fps: int,
     teleop_action_processor: RobotProcessorPipeline,
@@ -275,29 +277,11 @@ class DAggerStrategy(RolloutStrategy):
 
     def __init__(self, config: DAggerStrategyConfig):
         super().__init__(config)
-        self._engine: InferenceEngine | None = None
-        self._interpolator: ActionInterpolator | None = None
         self._listener = None
         self._events: dict[str, Any] = {}
 
     def setup(self, ctx: RolloutContext) -> None:
-        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
-
-        self._engine = InferenceEngine(
-            policy=ctx.policy,
-            preprocessor=ctx.preprocessor,
-            postprocessor=ctx.postprocessor,
-            robot_wrapper=ctx.robot_wrapper,
-            rtc_config=ctx.cfg.rtc,
-            hw_features=ctx.hw_features,
-            action_keys=ctx.action_keys,
-            task=ctx.cfg.task,
-            fps=ctx.cfg.fps,
-            device=ctx.cfg.device,
-            use_torch_compile=ctx.cfg.use_torch_compile,
-            compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
-        )
-        self._engine.start()
+        self._init_engine(ctx)
 
         self._listener, self._events = _init_dagger_keyboard()
         _start_pedal_listener(self._events)
@@ -350,9 +334,6 @@ class DAggerStrategy(RolloutStrategy):
     def teardown(self, ctx: RolloutContext) -> None:
         log_say("Stop recording", self.config.play_sounds, blocking=True)
 
-        if self._engine is not None:
-            self._engine.stop()
-
         if self._listener is not None and not is_headless():
             self._listener.stop()
 
@@ -364,10 +345,7 @@ class DAggerStrategy(RolloutStrategy):
                     private=ctx.cfg.dataset.private,
                 )
 
-        if ctx.robot.is_connected:
-            ctx.robot.disconnect()
-        if ctx.teleop is not None and ctx.teleop.is_connected:
-            ctx.teleop.disconnect()
+        self._teardown_hardware(ctx)
         logger.info("DAgger strategy teardown complete")
 
     # ------------------------------------------------------------------
@@ -404,7 +382,6 @@ class DAggerStrategy(RolloutStrategy):
         timestamp = 0.0
         record_tick = 0
         start_t = time.perf_counter()
-        warmup_flushed = False
 
         if engine.is_rtc:
             engine.resume()
@@ -493,20 +470,9 @@ class DAggerStrategy(RolloutStrategy):
                 if engine.is_rtc:
                     engine.update_observation(obs_processed)
 
-                # Wait for torch.compile warmup
-                if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                    dt = time.perf_counter() - loop_start
-                    if (sleep_t := control_interval - dt) > 0:
-                        precise_sleep(sleep_t)
+                if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                     timestamp = time.perf_counter() - start_t
                     continue
-
-                if cfg.use_torch_compile and not warmup_flushed:
-                    engine.reset()
-                    interpolator.reset()
-                    warmup_flushed = True
-                    if engine.is_rtc:
-                        engine.resume()
 
                 action_dict = infer_action(
                     engine, obs_processed, obs, ctx, interpolator, ordered_keys, features

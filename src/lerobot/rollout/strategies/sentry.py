@@ -19,17 +19,15 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from threading import Thread
+from threading import Event, Thread
 
 from lerobot.datasets import VideoEncodingManager
-from lerobot.policies.rtc import ActionInterpolator
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..configs import SentryStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine
 from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
@@ -54,29 +52,11 @@ class SentryStrategy(RolloutStrategy):
 
     def __init__(self, config: SentryStrategyConfig):
         super().__init__(config)
-        self._engine: InferenceEngine | None = None
-        self._interpolator: ActionInterpolator | None = None
         self._push_thread: Thread | None = None
-        self._needs_push: bool = False
+        self._needs_push = Event()
 
     def setup(self, ctx: RolloutContext) -> None:
-        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
-
-        self._engine = InferenceEngine(
-            policy=ctx.policy,
-            preprocessor=ctx.preprocessor,
-            postprocessor=ctx.postprocessor,
-            robot_wrapper=ctx.robot_wrapper,
-            rtc_config=ctx.cfg.rtc,
-            hw_features=ctx.hw_features,
-            action_keys=ctx.action_keys,
-            task=ctx.cfg.task,
-            fps=ctx.cfg.fps,
-            device=ctx.cfg.device,
-            use_torch_compile=ctx.cfg.use_torch_compile,
-            compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
-        )
-        self._engine.start()
+        self._init_engine(ctx)
         logger.info(
             "Sentry strategy ready (episode_duration=%.0fs, upload_every=%d eps)",
             self.config.episode_duration_s,
@@ -100,7 +80,6 @@ class SentryStrategy(RolloutStrategy):
         start_time = time.perf_counter()
         episode_start = time.perf_counter()
         episodes_since_push = 0
-        warmup_flushed = False
         task_str = cfg.dataset.single_task if cfg.dataset else cfg.task
 
         with VideoEncodingManager(dataset):
@@ -117,18 +96,8 @@ class SentryStrategy(RolloutStrategy):
                     if engine.is_rtc:
                         engine.update_observation(obs_processed)
 
-                    if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                        dt = time.perf_counter() - loop_start
-                        if (sleep_t := control_interval - dt) > 0:
-                            precise_sleep(sleep_t)
+                    if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                         continue
-
-                    if cfg.use_torch_compile and not warmup_flushed:
-                        engine.reset()
-                        interpolator.reset()
-                        warmup_flushed = True
-                        if engine.is_rtc:
-                            engine.resume()
 
                     action_dict = infer_action(
                         engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
@@ -146,7 +115,7 @@ class SentryStrategy(RolloutStrategy):
                     if elapsed >= self.config.episode_duration_s:
                         dataset.save_episode()
                         episodes_since_push += 1
-                        self._needs_push = True
+                        self._needs_push.set()
                         logger.info("Episode saved (total: %d)", dataset.num_episodes)
 
                         if episodes_since_push >= self.config.upload_every_n_episodes:
@@ -166,12 +135,9 @@ class SentryStrategy(RolloutStrategy):
             finally:
                 with contextlib.suppress(Exception):
                     dataset.save_episode()
-                    self._needs_push = True
+                    self._needs_push.set()
 
     def teardown(self, ctx: RolloutContext) -> None:
-        if self._engine is not None:
-            self._engine.stop()
-
         # Wait for any in-flight background push
         if self._push_thread is not None and self._push_thread.is_alive():
             self._push_thread.join(timeout=60)
@@ -179,16 +145,13 @@ class SentryStrategy(RolloutStrategy):
         if ctx.dataset is not None:
             ctx.dataset.finalize()
             # Only push if there are unsaved changes since last background push
-            if self._needs_push and ctx.cfg.dataset and ctx.cfg.dataset.push_to_hub:
+            if self._needs_push.is_set() and ctx.cfg.dataset and ctx.cfg.dataset.push_to_hub:
                 ctx.dataset.push_to_hub(
                     tags=ctx.cfg.dataset.tags,
                     private=ctx.cfg.dataset.private,
                 )
 
-        if ctx.robot.is_connected:
-            ctx.robot.disconnect()
-        if ctx.teleop is not None and ctx.teleop.is_connected:
-            ctx.teleop.disconnect()
+        self._teardown_hardware(ctx)
         logger.info("Sentry strategy teardown complete")
 
     def _background_push(self, dataset, cfg) -> None:
@@ -203,7 +166,7 @@ class SentryStrategy(RolloutStrategy):
                     tags=cfg.dataset.tags if cfg.dataset else None,
                     private=cfg.dataset.private if cfg.dataset else False,
                 )
-                self._needs_push = False
+                self._needs_push.clear()
                 logger.info("Background push to hub complete")
             except Exception as e:
                 logger.error("Background push failed: %s", e)

@@ -19,11 +19,9 @@ from __future__ import annotations
 import logging
 import time
 
-from lerobot.policies.rtc import ActionInterpolator
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..context import RolloutContext
-from ..inference import InferenceEngine
 from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
@@ -37,29 +35,8 @@ class BaseStrategy(RolloutStrategy):
     ``robot_action_processor`` pipeline before reaching the robot.
     """
 
-    def __init__(self, config):
-        super().__init__(config)
-        self._engine: InferenceEngine | None = None
-        self._interpolator: ActionInterpolator | None = None
-
     def setup(self, ctx: RolloutContext) -> None:
-        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
-
-        self._engine = InferenceEngine(
-            policy=ctx.policy,
-            preprocessor=ctx.preprocessor,
-            postprocessor=ctx.postprocessor,
-            robot_wrapper=ctx.robot_wrapper,
-            rtc_config=ctx.cfg.rtc,
-            hw_features=ctx.hw_features,
-            action_keys=ctx.action_keys,
-            task=ctx.cfg.task,
-            fps=ctx.cfg.fps,
-            device=ctx.cfg.device,
-            use_torch_compile=ctx.cfg.use_torch_compile,
-            compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
-        )
-        self._engine.start()
+        self._init_engine(ctx)
         logger.info("Base strategy ready (rtc=%s)", self._engine.is_rtc)
 
     def run(self, ctx: RolloutContext) -> None:
@@ -72,7 +49,6 @@ class BaseStrategy(RolloutStrategy):
         ordered_keys = ctx.ordered_action_keys
 
         start_time = time.perf_counter()
-        warmup_flushed = False
 
         if engine.is_rtc:
             engine.resume()
@@ -89,19 +65,8 @@ class BaseStrategy(RolloutStrategy):
             if engine.is_rtc:
                 engine.update_observation(obs_processed)
 
-            # Wait for torch.compile warmup before running live inference
-            if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                dt = time.perf_counter() - loop_start
-                if (sleep_t := control_interval - dt) > 0:
-                    precise_sleep(sleep_t)
+            if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                 continue
-
-            if cfg.use_torch_compile and not warmup_flushed:
-                engine.reset()
-                interpolator.reset()
-                warmup_flushed = True
-                if engine.is_rtc:
-                    engine.resume()
 
             infer_action(engine, obs_processed, obs, ctx, interpolator, ordered_keys, ctx.dataset_features)
 
@@ -110,10 +75,5 @@ class BaseStrategy(RolloutStrategy):
                 precise_sleep(sleep_t)
 
     def teardown(self, ctx: RolloutContext) -> None:
-        if self._engine is not None:
-            self._engine.stop()
-        if ctx.robot.is_connected:
-            ctx.robot.disconnect()
-        if ctx.teleop is not None and ctx.teleop.is_connected:
-            ctx.teleop.disconnect()
+        self._teardown_hardware(ctx)
         logger.info("Base strategy teardown complete")
