@@ -20,6 +20,9 @@ import time
 
 import pytest
 import torch
+
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from torch.multiprocessing import Event, Queue
 
 from lerobot.configs.train import TrainRLServerPipelineConfig
@@ -27,7 +30,7 @@ from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.policies.sac.configuration_sac import SACConfig
 from lerobot.utils.constants import ACTION, OBS_STATE, OBS_STR
 from lerobot.utils.transition import Transition
-from tests.utils import require_package
+from tests.utils import skip_if_package_missing
 
 
 def create_test_transitions(count: int = 3) -> list[Transition]:
@@ -89,7 +92,7 @@ def cfg():
     return cfg
 
 
-@require_package("grpcio", "grpc")
+@skip_if_package_missing("grpcio", "grpc")
 @pytest.mark.timeout(10)  # force cross-platform watchdog
 def test_end_to_end_transitions_flow(cfg):
     from lerobot.rl.actor import (
@@ -151,7 +154,7 @@ def test_end_to_end_transitions_flow(cfg):
         assert_transitions_equal(transition, input_transitions[i])
 
 
-@require_package("grpcio", "grpc")
+@skip_if_package_missing("grpcio", "grpc")
 @pytest.mark.timeout(10)
 def test_end_to_end_interactions_flow(cfg):
     from lerobot.rl.actor import (
@@ -224,7 +227,7 @@ def test_end_to_end_interactions_flow(cfg):
         assert received == expected
 
 
-@require_package("grpcio", "grpc")
+@skip_if_package_missing("grpcio", "grpc")
 @pytest.mark.parametrize("data_size", ["small", "large"])
 @pytest.mark.timeout(10)
 def test_end_to_end_parameters_flow(cfg, data_size):
