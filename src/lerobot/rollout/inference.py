@@ -31,10 +31,10 @@ from typing import Any
 
 import torch
 
-from lerobot.common.control_utils import prepare_observation_for_inference
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.policies.rtc import ActionInterpolator, ActionQueue, LatencyTracker
+from lerobot.policies.rtc import ActionQueue, LatencyTracker
 from lerobot.policies.rtc.configuration_rtc import RTCConfig
+from lerobot.policies.utils import prepare_observation_for_inference
 from lerobot.processor import (
     NormalizerProcessorStep,
     PolicyProcessorPipeline,
@@ -93,26 +93,6 @@ def _normalize_prev_actions_length(prev_actions: torch.Tensor, target_steps: int
     return padded
 
 
-def _resolve_action_key_order(
-    policy_action_names: list[str] | None, dataset_action_names: list[str]
-) -> list[str]:
-    """Choose action name ordering for mapping policy tensor outputs to robot action dicts."""
-    if not policy_action_names:
-        return dataset_action_names
-    policy_action_names = list(policy_action_names)
-    if len(policy_action_names) != len(dataset_action_names):
-        logger.warning(
-            "policy.action_feature_names length (%d) != dataset action dim (%d); using dataset order",
-            len(policy_action_names),
-            len(dataset_action_names),
-        )
-        return dataset_action_names
-    if set(dataset_action_names) != set(policy_action_names):
-        logger.warning("policy.action_feature_names keys don't match dataset; using dataset order")
-        return dataset_action_names
-    return policy_action_names
-
-
 # ---------------------------------------------------------------------------
 # InferenceEngine
 # ---------------------------------------------------------------------------
@@ -143,12 +123,13 @@ class InferenceEngine:
         Control loop frequency.
     device:
         Torch device string.
-    interpolator:
-        Action interpolator (used only in RTC mode for the actor loop).
     use_torch_compile:
         Whether torch.compile warmup is needed.
     compile_warmup_inferences:
         Number of warmup inferences before live rollout.
+    rtc_queue_threshold:
+        Maximum RTC action queue size before the background thread
+        pauses generation.  Prevents unbounded queue growth.
     """
 
     def __init__(
@@ -163,9 +144,9 @@ class InferenceEngine:
         task: str,
         fps: float,
         device: str | None,
-        interpolator: ActionInterpolator | None = None,
         use_torch_compile: bool = False,
         compile_warmup_inferences: int = 2,
+        rtc_queue_threshold: int = 30,
     ) -> None:
         self._policy = policy
         self._preprocessor = preprocessor
@@ -177,9 +158,9 @@ class InferenceEngine:
         self._task = task
         self._fps = fps
         self._device = device or "cpu"
-        self._interpolator = interpolator
         self._use_torch_compile = use_torch_compile
         self._compile_warmup_inferences = compile_warmup_inferences
+        self._rtc_queue_threshold = rtc_queue_threshold
 
         # RTC state
         self._use_rtc = rtc_config.enabled
@@ -270,8 +251,6 @@ class InferenceEngine:
         self._postprocessor.reset()
         if self._use_rtc:
             self._action_queue = ActionQueue(self._rtc_config)
-        if self._interpolator is not None:
-            self._interpolator.reset()
 
     # ------------------------------------------------------------------
     # Sync inference
@@ -329,8 +308,7 @@ class InferenceEngine:
         try:
             latency_tracker = LatencyTracker()
             time_per_chunk = 1.0 / self._fps
-            threshold = 30
-            policy_device = self._policy.config.device
+            policy_device = torch.device(self._device)
 
             warmup_required = max(1, self._compile_warmup_inferences) if self._use_torch_compile else 0
             inference_count = 0
@@ -347,7 +325,7 @@ class InferenceEngine:
                     time.sleep(0.01)
                     continue
 
-                if queue.qsize() <= threshold:
+                if queue.qsize() <= self._rtc_queue_threshold:
                     try:
                         current_time = time.perf_counter()
                         idx_before = queue.get_action_index()
@@ -356,35 +334,29 @@ class InferenceEngine:
                         latency = latency_tracker.max()
                         delay = math.ceil(latency / time_per_chunk) if latency else 0
 
-                        # Build observation batch
+                        # Build observation batch using the same pipeline as sync inference
                         obs_batch = build_dataset_frame(self._hw_features, obs, prefix="observation")
-                        for name in obs_batch:
-                            obs_batch[name] = torch.from_numpy(obs_batch[name])
-                            if "image" in name:
-                                obs_batch[name] = obs_batch[name].float() / 255
-                                obs_batch[name] = obs_batch[name].permute(2, 0, 1).contiguous()
-                            obs_batch[name] = obs_batch[name].unsqueeze(0).to(policy_device)
-
+                        obs_batch = prepare_observation_for_inference(
+                            obs_batch, policy_device, self._task, self._robot.robot_type
+                        )
+                        # predict_action_chunk expects batched task format
                         obs_batch["task"] = [self._task]
-                        obs_batch["robot_type"] = self._obs_holder.get("robot_type", "unknown")
 
                         preprocessed = self._preprocessor(obs_batch)
 
                         # Re-anchor leftover for relative-action policies
-                        if (
-                            prev_actions is not None
-                            and self._relative_step is not None
-                            and OBS_STATE in obs_batch
-                        ):
-                            prev_abs = queue.get_processed_left_over()
-                            if prev_abs is not None and prev_abs.numel() > 0:
-                                prev_actions = _reanchor_relative_rtc_prefix(
-                                    prev_actions_absolute=prev_abs,
-                                    current_state=obs_batch[OBS_STATE],
-                                    relative_step=self._relative_step,
-                                    normalizer_step=self._normalizer_step,
-                                    policy_device=policy_device,
-                                )
+                        if prev_actions is not None and self._relative_step is not None:
+                            state_tensor = preprocessed.get(OBS_STATE)
+                            if state_tensor is not None:
+                                prev_abs = queue.get_processed_left_over()
+                                if prev_abs is not None and prev_abs.numel() > 0:
+                                    prev_actions = _reanchor_relative_rtc_prefix(
+                                        prev_actions_absolute=prev_abs,
+                                        current_state=state_tensor,
+                                        relative_step=self._relative_step,
+                                        normalizer_step=self._normalizer_step,
+                                        policy_device=policy_device,
+                                    )
 
                         if prev_actions is not None:
                             prev_actions = _normalize_prev_actions_length(

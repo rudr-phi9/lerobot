@@ -20,14 +20,11 @@ import logging
 import time
 
 from lerobot.policies.rtc import ActionInterpolator
-from lerobot.policies.utils import make_robot_action
-from lerobot.utils.constants import OBS_STR
-from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..context import RolloutContext
-from ..inference import InferenceEngine, _resolve_action_key_order
-from . import RolloutStrategy
+from ..inference import InferenceEngine
+from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +40,10 @@ class BaseStrategy(RolloutStrategy):
     def __init__(self, config):
         super().__init__(config)
         self._engine: InferenceEngine | None = None
+        self._interpolator: ActionInterpolator | None = None
 
     def setup(self, ctx: RolloutContext) -> None:
-        interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
+        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
 
         self._engine = InferenceEngine(
             policy=ctx.policy,
@@ -58,7 +56,6 @@ class BaseStrategy(RolloutStrategy):
             task=ctx.cfg.task,
             fps=ctx.cfg.fps,
             device=ctx.cfg.device,
-            interpolator=interpolator,
             use_torch_compile=ctx.cfg.use_torch_compile,
             compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
         )
@@ -69,16 +66,10 @@ class BaseStrategy(RolloutStrategy):
         engine = self._engine
         cfg = ctx.cfg
         robot = ctx.robot_wrapper
-        action_keys = ctx.action_keys
+        interpolator = self._interpolator
 
-        interpolator = ActionInterpolator(multiplier=cfg.interpolation_multiplier)
         control_interval = interpolator.get_control_interval(cfg.fps)
-
-        policy_action_names = getattr(cfg.policy, "action_feature_names", None)
-        ordered_keys = _resolve_action_key_order(
-            list(policy_action_names) if policy_action_names else None,
-            action_keys,
-        )
+        ordered_keys = ctx.ordered_action_keys
 
         start_time = time.perf_counter()
         warmup_flushed = False
@@ -98,34 +89,21 @@ class BaseStrategy(RolloutStrategy):
             if engine.is_rtc:
                 engine.update_observation(obs_processed)
 
-                if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                    dt = time.perf_counter() - loop_start
-                    if (sleep_t := control_interval - dt) > 0:
-                        precise_sleep(sleep_t)
-                    continue
+            # Wait for torch.compile warmup before running live inference
+            if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
+                dt = time.perf_counter() - loop_start
+                if (sleep_t := control_interval - dt) > 0:
+                    precise_sleep(sleep_t)
+                continue
 
-                if cfg.use_torch_compile and not warmup_flushed:
-                    engine.reset()
-                    interpolator.reset()
-                    warmup_flushed = True
+            if cfg.use_torch_compile and not warmup_flushed:
+                engine.reset()
+                interpolator.reset()
+                warmup_flushed = True
+                if engine.is_rtc:
+                    engine.resume()
 
-                if interpolator.needs_new_action():
-                    action_tensor = engine.consume_rtc_action()
-                    if action_tensor is not None:
-                        interpolator.add(action_tensor.cpu())
-
-                interp = interpolator.get()
-                if interp is not None:
-                    action_dict = {k: interp[i].item() for i, k in enumerate(ordered_keys) if i < len(interp)}
-                    processed = ctx.robot_action_processor((action_dict, obs))
-                    robot.send_action(processed)
-
-            else:
-                obs_frame = build_dataset_frame(ctx.dataset_features, obs_processed, prefix=OBS_STR)
-                action_tensor = engine.get_action_sync(obs_frame)
-                action_dict = make_robot_action(action_tensor, ctx.dataset_features)
-                processed = ctx.robot_action_processor((action_dict, obs))
-                robot.send_action(processed)
+            infer_action(engine, obs_processed, obs, ctx, interpolator, ordered_keys, ctx.dataset_features)
 
             dt = time.perf_counter() - loop_start
             if (sleep_t := control_interval - dt) > 0:

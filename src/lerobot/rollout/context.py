@@ -42,10 +42,30 @@ from lerobot.robots import Robot, make_robot_from_config
 from lerobot.teleoperators import Teleoperator, make_teleoperator_from_config
 from lerobot.utils.feature_utils import combine_feature_dicts, hw_to_dataset_features
 
-from .configs import BaseStrategyConfig, RolloutConfig
+from .configs import BaseStrategyConfig, DAggerStrategyConfig, RolloutConfig
 from .robot_wrapper import ThreadSafeRobot
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_action_key_order(
+    policy_action_names: list[str] | None, dataset_action_names: list[str]
+) -> list[str]:
+    """Choose action name ordering for mapping policy tensor outputs to robot action dicts."""
+    if not policy_action_names:
+        return dataset_action_names
+    policy_action_names = list(policy_action_names)
+    if len(policy_action_names) != len(dataset_action_names):
+        logger.warning(
+            "policy.action_feature_names length (%d) != dataset action dim (%d); using dataset order",
+            len(policy_action_names),
+            len(dataset_action_names),
+        )
+        return dataset_action_names
+    if set(dataset_action_names) != set(policy_action_names):
+        logger.warning("policy.action_feature_names keys don't match dataset; using dataset order")
+        return dataset_action_names
+    return policy_action_names
 
 
 @dataclass
@@ -69,6 +89,7 @@ class RolloutContext:
     shutdown_event: Event = field(default_factory=Event)
     dataset_features: dict = field(default_factory=dict)
     action_keys: list[str] = field(default_factory=list)
+    ordered_action_keys: list[str] = field(default_factory=list)
     hw_features: dict = field(default_factory=dict)
 
 
@@ -92,26 +113,37 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
     # --- Policy ---
+    # Use cfg.policy directly (already loaded in RolloutConfig.__post_init__)
+    # instead of reloading from disk.
+    policy_config = cfg.policy
     use_rtc = cfg.rtc.enabled
-    policy_class = get_policy_class(cfg.policy.type)
-    policy_config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
+    policy_class = get_policy_class(policy_config.type)
+
+    # Reload config from pretrained path for full model parameters
+    full_config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
+    # Merge any CLI overrides from cfg.policy into full_config
+    for attr in ("device", "use_amp"):
+        if hasattr(cfg.policy, attr) and hasattr(full_config, attr):
+            cli_val = getattr(cfg.policy, attr)
+            if cli_val is not None:
+                setattr(full_config, attr, cli_val)
 
     # Set compile_model for pi0/pi05
-    if hasattr(policy_config, "compile_model"):
-        policy_config.compile_model = cfg.use_torch_compile
+    if hasattr(full_config, "compile_model"):
+        full_config.compile_model = cfg.use_torch_compile
 
     # Handle PEFT models
-    if policy_config.use_peft:
+    if full_config.use_peft:
         from peft import PeftConfig, PeftModel
 
         peft_path = cfg.policy.pretrained_path
         peft_config = PeftConfig.from_pretrained(peft_path)
         policy = policy_class.from_pretrained(
-            pretrained_name_or_path=peft_config.base_model_name_or_path, config=policy_config
+            pretrained_name_or_path=peft_config.base_model_name_or_path, config=full_config
         )
         policy = PeftModel.from_pretrained(policy, peft_path, config=peft_config)
     else:
-        policy = policy_class.from_pretrained(cfg.policy.pretrained_path, config=policy_config)
+        policy = policy_class.from_pretrained(cfg.policy.pretrained_path, config=full_config)
 
     # Enable RTC on the policy
     if use_rtc:
@@ -136,10 +168,13 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
         except Exception as e:
             logger.warning("Failed to apply torch.compile: %s", e)
 
-    # --- Observation features (filter to .pos joints + camera streams) ---
+    # --- Observation features ---
+    # Hardware-level features: camera features are tuples (H, W, C), state
+    # features are the ``float`` type.  This is the canonical pattern used
+    # throughout the codebase (see feature_utils.py:hw_to_dataset_features).
     all_obs_features = robot.observation_features
     observation_features_hw = {
-        k: v for k, v in all_obs_features.items() if k.endswith(".pos") or isinstance(v, tuple)
+        k: v for k, v in all_obs_features.items() if v is float or isinstance(v, tuple)
     }
 
     action_features_hw = {k: v for k, v in robot.action_features.items() if k.endswith(".pos")}
@@ -163,6 +198,13 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
     # Action keys
     action_keys = [k for k in robot.action_features if k.endswith(".pos")]
 
+    # Ordered action keys (reconcile policy vs dataset ordering)
+    policy_action_names = getattr(policy_config, "action_feature_names", None)
+    ordered_action_keys = _resolve_action_key_order(
+        list(policy_action_names) if policy_action_names else None,
+        action_keys,
+    )
+
     # --- Dataset ---
     dataset = None
     if cfg.dataset is not None and not isinstance(cfg.strategy, BaseStrategyConfig):
@@ -180,6 +222,14 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
                 * len(robot.cameras if hasattr(robot, "cameras") else []),
             )
         else:
+            # Add intervention column for DAgger strategy
+            if isinstance(cfg.strategy, DAggerStrategyConfig):
+                dataset_features["intervention"] = {
+                    "dtype": "int64",
+                    "shape": (1,),
+                    "names": None,
+                }
+
             dataset = LeRobotDataset.create(
                 cfg.dataset.repo_id,
                 cfg.dataset.fps,
@@ -206,11 +256,11 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
         )
 
     preprocessor, postprocessor = make_pre_post_processors(
-        policy_cfg=cfg.policy,
+        policy_cfg=policy_config,
         pretrained_path=cfg.policy.pretrained_path,
         dataset_stats=dataset_stats,
         preprocessor_overrides={
-            "device_processor": {"device": cfg.device or cfg.policy.device},
+            "device_processor": {"device": cfg.device or getattr(policy_config, "device", "cpu")},
             "rename_observations_processor": {"rename_map": cfg.dataset.rename_map if cfg.dataset else {}},
         },
     )
@@ -230,5 +280,6 @@ def build_rollout_context(cfg: RolloutConfig, shutdown_event: Event) -> RolloutC
         shutdown_event=shutdown_event,
         dataset_features=dataset_features,
         action_keys=action_keys,
+        ordered_action_keys=ordered_action_keys,
         hw_features=hw_features,
     )

@@ -16,21 +16,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from threading import Thread
 
 from lerobot.datasets import VideoEncodingManager
 from lerobot.policies.rtc import ActionInterpolator
-from lerobot.policies.utils import make_robot_action
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..configs import SentryStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine, _resolve_action_key_order
-from . import RolloutStrategy
+from ..inference import InferenceEngine
+from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,12 @@ class SentryStrategy(RolloutStrategy):
     def __init__(self, config: SentryStrategyConfig):
         super().__init__(config)
         self._engine: InferenceEngine | None = None
+        self._interpolator: ActionInterpolator | None = None
         self._push_thread: Thread | None = None
+        self._needs_push: bool = False
 
     def setup(self, ctx: RolloutContext) -> None:
-        interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
+        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
 
         self._engine = InferenceEngine(
             policy=ctx.policy,
@@ -71,7 +73,6 @@ class SentryStrategy(RolloutStrategy):
             task=ctx.cfg.task,
             fps=ctx.cfg.fps,
             device=ctx.cfg.device,
-            interpolator=interpolator,
             use_torch_compile=ctx.cfg.use_torch_compile,
             compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
         )
@@ -87,16 +88,11 @@ class SentryStrategy(RolloutStrategy):
         cfg = ctx.cfg
         robot = ctx.robot_wrapper
         dataset = ctx.dataset
-        action_keys = ctx.action_keys
+        interpolator = self._interpolator
 
-        interpolator = ActionInterpolator(multiplier=cfg.interpolation_multiplier)
         control_interval = interpolator.get_control_interval(cfg.fps)
-
-        policy_action_names = getattr(cfg.policy, "action_feature_names", None)
-        ordered_keys = _resolve_action_key_order(
-            list(policy_action_names) if policy_action_names else None,
-            action_keys,
-        )
+        ordered_keys = ctx.ordered_action_keys
+        features = dataset.features
 
         if engine.is_rtc:
             engine.resume()
@@ -117,45 +113,31 @@ class SentryStrategy(RolloutStrategy):
 
                     obs = robot.get_observation()
                     obs_processed = ctx.robot_observation_processor(obs)
-                    action_dict = None
 
                     if engine.is_rtc:
                         engine.update_observation(obs_processed)
 
-                        if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                            dt = time.perf_counter() - loop_start
-                            if (sleep_t := control_interval - dt) > 0:
-                                precise_sleep(sleep_t)
-                            continue
+                    if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
+                        dt = time.perf_counter() - loop_start
+                        if (sleep_t := control_interval - dt) > 0:
+                            precise_sleep(sleep_t)
+                        continue
 
-                        if cfg.use_torch_compile and not warmup_flushed:
-                            engine.reset()
-                            interpolator.reset()
-                            warmup_flushed = True
+                    if cfg.use_torch_compile and not warmup_flushed:
+                        engine.reset()
+                        interpolator.reset()
+                        warmup_flushed = True
+                        if engine.is_rtc:
+                            engine.resume()
 
-                        if interpolator.needs_new_action():
-                            action_tensor = engine.consume_rtc_action()
-                            if action_tensor is not None:
-                                interpolator.add(action_tensor.cpu())
-
-                        interp = interpolator.get()
-                        if interp is not None:
-                            action_dict = {
-                                k: interp[i].item() for i, k in enumerate(ordered_keys) if i < len(interp)
-                            }
-                            processed = ctx.robot_action_processor((action_dict, obs))
-                            robot.send_action(processed)
-                    else:
-                        obs_frame = build_dataset_frame(ctx.dataset_features, obs_processed, prefix=OBS_STR)
-                        action_tensor = engine.get_action_sync(obs_frame)
-                        action_dict = make_robot_action(action_tensor, ctx.dataset_features)
-                        processed = ctx.robot_action_processor((action_dict, obs))
-                        robot.send_action(processed)
+                    action_dict = infer_action(
+                        engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
+                    )
 
                     # Record frame
                     if action_dict is not None:
-                        obs_frame = build_dataset_frame(ctx.dataset_features, obs_processed, prefix=OBS_STR)
-                        action_frame = build_dataset_frame(ctx.dataset_features, action_dict, prefix=ACTION)
+                        obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
+                        action_frame = build_dataset_frame(features, action_dict, prefix=ACTION)
                         frame = {**obs_frame, **action_frame, "task": task_str}
                         dataset.add_frame(frame)
 
@@ -164,6 +146,7 @@ class SentryStrategy(RolloutStrategy):
                     if elapsed >= self.config.episode_duration_s:
                         dataset.save_episode()
                         episodes_since_push += 1
+                        self._needs_push = True
                         logger.info("Episode saved (total: %d)", dataset.num_episodes)
 
                         if episodes_since_push >= self.config.upload_every_n_episodes:
@@ -181,25 +164,26 @@ class SentryStrategy(RolloutStrategy):
                         precise_sleep(sleep_t)
 
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     dataset.save_episode()
-                except Exception:
-                    pass
+                    self._needs_push = True
 
     def teardown(self, ctx: RolloutContext) -> None:
         if self._engine is not None:
             self._engine.stop()
 
+        # Wait for any in-flight background push
+        if self._push_thread is not None and self._push_thread.is_alive():
+            self._push_thread.join(timeout=60)
+
         if ctx.dataset is not None:
             ctx.dataset.finalize()
-            if ctx.cfg.dataset and ctx.cfg.dataset.push_to_hub:
+            # Only push if there are unsaved changes since last background push
+            if self._needs_push and ctx.cfg.dataset and ctx.cfg.dataset.push_to_hub:
                 ctx.dataset.push_to_hub(
                     tags=ctx.cfg.dataset.tags,
                     private=ctx.cfg.dataset.private,
                 )
-
-        if self._push_thread is not None and self._push_thread.is_alive():
-            self._push_thread.join(timeout=60)
 
         if ctx.robot.is_connected:
             ctx.robot.disconnect()
@@ -219,6 +203,7 @@ class SentryStrategy(RolloutStrategy):
                     tags=cfg.dataset.tags if cfg.dataset else None,
                     private=cfg.dataset.private if cfg.dataset else False,
                 )
+                self._needs_push = False
                 logger.info("Background push to hub complete")
             except Exception as e:
                 logger.error("Background push failed: %s", e)

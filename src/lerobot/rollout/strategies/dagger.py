@@ -29,26 +29,26 @@ Keyboard Controls:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from typing import Any
 
-import torch
+import numpy as np
 
-from lerobot.common.control_utils import is_headless, predict_action
+from lerobot.common.control_utils import is_headless
 from lerobot.datasets import VideoEncodingManager
 from lerobot.policies.rtc import ActionInterpolator
-from lerobot.policies.utils import make_robot_action
+from lerobot.processor import RobotProcessorPipeline
 from lerobot.utils.constants import ACTION, OBS_STR
-from lerobot.utils.device_utils import get_safe_torch_device
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.utils import log_say
 
 from ..configs import DAggerStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine, _resolve_action_key_order
-from . import RolloutStrategy
+from ..inference import InferenceEngine
+from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +94,19 @@ def _teleop_smooth_move_to(teleop, target_pos: dict, duration_s: float = 2.0, fp
         time.sleep(1 / fps)
 
 
-def _reset_loop(robot, teleop, events: dict, fps: int) -> None:
-    """Reset period where the human repositions the environment."""
+def _reset_loop(
+    robot,
+    teleop,
+    events: dict,
+    fps: int,
+    teleop_action_processor: RobotProcessorPipeline,
+    robot_action_processor: RobotProcessorPipeline,
+) -> None:
+    """Reset period where the human repositions the environment.
+
+    All teleop actions flow through the processor pipelines to ensure
+    correct behavior for EE-space robots.
+    """
     logger.info("RESET — press any key to enable teleoperation")
 
     events["in_reset"] = True
@@ -117,8 +128,11 @@ def _reset_loop(robot, teleop, events: dict, fps: int) -> None:
 
     while not events["start_next_episode"] and not events["stop_recording"]:
         loop_start = time.perf_counter()
+        obs = robot.get_observation()
         action = teleop.get_action()
-        robot.send_action(action)
+        processed_teleop = teleop_action_processor((action, obs))
+        robot_action_to_send = robot_action_processor((processed_teleop, obs))
+        robot.send_action(robot_action_to_send)
         precise_sleep(1 / fps - (time.perf_counter() - loop_start))
 
     events["in_reset"] = False
@@ -251,6 +265,10 @@ class DAggerStrategy(RolloutStrategy):
     Supports both synchronous and RTC inference backends.
     All actions (policy and teleop) flow through the appropriate
     processor pipelines, supporting EE-space recording.
+
+    Intervention frames are tagged with ``intervention=1`` (int64) in
+    the dataset to allow downstream BC training to distinguish
+    autonomous from human-corrected data.
     """
 
     config: DAggerStrategyConfig
@@ -258,11 +276,12 @@ class DAggerStrategy(RolloutStrategy):
     def __init__(self, config: DAggerStrategyConfig):
         super().__init__(config)
         self._engine: InferenceEngine | None = None
+        self._interpolator: ActionInterpolator | None = None
         self._listener = None
         self._events: dict[str, Any] = {}
 
     def setup(self, ctx: RolloutContext) -> None:
-        interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
+        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
 
         self._engine = InferenceEngine(
             policy=ctx.policy,
@@ -275,7 +294,6 @@ class DAggerStrategy(RolloutStrategy):
             task=ctx.cfg.task,
             fps=ctx.cfg.fps,
             device=ctx.cfg.device,
-            interpolator=interpolator,
             use_torch_compile=ctx.cfg.use_torch_compile,
             compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
         )
@@ -293,7 +311,6 @@ class DAggerStrategy(RolloutStrategy):
         logger.info("Controls: SPACE=pause, c=take control, p=resume, ->=end, <-=redo, ESC=stop")
 
     def run(self, ctx: RolloutContext) -> None:
-        engine = self._engine
         dataset = ctx.dataset
         events = self._events
         teleop = ctx.teleop
@@ -317,13 +334,18 @@ class DAggerStrategy(RolloutStrategy):
                     recorded += 1
 
                     if recorded < self.config.num_episodes and not events["stop_recording"]:
-                        _reset_loop(ctx.robot_wrapper, teleop, events, int(ctx.cfg.fps))
+                        _reset_loop(
+                            ctx.robot_wrapper,
+                            teleop,
+                            events,
+                            int(ctx.cfg.fps),
+                            ctx.teleop_action_processor,
+                            ctx.robot_action_processor,
+                        )
 
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     dataset.save_episode()
-                except Exception:
-                    pass
 
     def teardown(self, ctx: RolloutContext) -> None:
         log_say("Stop recording", self.config.play_sounds, blocking=True)
@@ -360,27 +382,22 @@ class DAggerStrategy(RolloutStrategy):
         teleop = ctx.teleop
         dataset = ctx.dataset
         events = self._events
+        interpolator = self._interpolator
 
-        interpolator = ActionInterpolator(multiplier=cfg.interpolation_multiplier)
         control_interval = interpolator.get_control_interval(cfg.fps)
         stream_online = bool(cfg.dataset.streaming_encoding) if cfg.dataset else False
         record_stride = max(1, cfg.interpolation_multiplier)
 
-        policy_action_names = getattr(cfg.policy, "action_feature_names", None)
-        ordered_keys = _resolve_action_key_order(
-            list(policy_action_names) if policy_action_names else None,
-            ctx.action_keys,
-        )
-
-        dataset_action_keys = list(dataset.features.get(ACTION, {}).get("names", ctx.action_keys))
+        ordered_keys = ctx.ordered_action_keys
+        features = dataset.features
 
         engine.reset()
+        interpolator.reset()
         _teleop_disable_torque(teleop)
 
         was_paused = False
         waiting_for_takeover = False
         last_action: dict[str, Any] | None = None
-        robot_action: dict[str, Any] = {}
         frame_buffer: list[dict] = []
         task_str = cfg.dataset.single_task if cfg.dataset else cfg.task
 
@@ -444,7 +461,7 @@ class DAggerStrategy(RolloutStrategy):
             # --- Get observation ---
             obs = robot.get_observation()
             obs_processed = ctx.robot_observation_processor(obs)
-            obs_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
+            obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
 
             # --- CORRECTION: human teleop control ---
             if events["correction_active"]:
@@ -452,9 +469,14 @@ class DAggerStrategy(RolloutStrategy):
                 processed_teleop = ctx.teleop_action_processor((teleop_action, obs))
                 robot_action_to_send = ctx.robot_action_processor((processed_teleop, obs))
                 robot.send_action(robot_action_to_send)
-                action_frame = build_dataset_frame(dataset.features, processed_teleop, prefix=ACTION)
+                action_frame = build_dataset_frame(features, processed_teleop, prefix=ACTION)
                 if record_tick % record_stride == 0:
-                    frame = {**obs_frame, **action_frame, "task": task_str}
+                    frame = {
+                        **obs_frame,
+                        **action_frame,
+                        "task": task_str,
+                        "intervention": np.array([1], dtype=np.int64),
+                    }
                     if stream_online:
                         dataset.add_frame(frame)
                     else:
@@ -471,73 +493,40 @@ class DAggerStrategy(RolloutStrategy):
                 if engine.is_rtc:
                     engine.update_observation(obs_processed)
 
-                    if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                        dt = time.perf_counter() - loop_start
-                        if (sleep_t := control_interval - dt) > 0:
-                            precise_sleep(sleep_t)
-                        timestamp = time.perf_counter() - start_t
-                        continue
+                # Wait for torch.compile warmup
+                if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
+                    dt = time.perf_counter() - loop_start
+                    if (sleep_t := control_interval - dt) > 0:
+                        precise_sleep(sleep_t)
+                    timestamp = time.perf_counter() - start_t
+                    continue
 
-                    if cfg.use_torch_compile and not warmup_flushed:
-                        engine.reset()
-                        interpolator.reset()
-                        warmup_flushed = True
-                        if engine.is_rtc:
-                            engine.resume()
+                if cfg.use_torch_compile and not warmup_flushed:
+                    engine.reset()
+                    interpolator.reset()
+                    warmup_flushed = True
+                    if engine.is_rtc:
+                        engine.resume()
 
-                    if interpolator.needs_new_action():
-                        action_tensor = engine.consume_rtc_action()
-                        if action_tensor is not None:
-                            interpolator.add(action_tensor.cpu())
+                action_dict = infer_action(
+                    engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
+                )
 
-                    interp = interpolator.get()
-                    if interp is not None:
-                        robot_action = {
-                            k: interp[i].item() for i, k in enumerate(ordered_keys) if i < len(interp)
+                if action_dict is not None:
+                    last_action = ctx.robot_action_processor((action_dict, obs))
+                    action_frame = build_dataset_frame(features, action_dict, prefix=ACTION)
+                    if record_tick % record_stride == 0:
+                        frame = {
+                            **obs_frame,
+                            **action_frame,
+                            "task": task_str,
+                            "intervention": np.array([0], dtype=np.int64),
                         }
-                        processed = ctx.robot_action_processor((robot_action, obs))
-                        robot.send_action(processed)
-                        last_action = processed
-                        action_frame = build_dataset_frame(dataset.features, robot_action, prefix=ACTION)
-                        if record_tick % record_stride == 0:
-                            frame = {**obs_frame, **action_frame, "task": task_str}
-                            if stream_online:
-                                dataset.add_frame(frame)
-                            else:
-                                frame_buffer.append(frame)
-                        record_tick += 1
-                else:
-                    # Sync inference
-                    if interpolator.needs_new_action():
-                        device = get_safe_torch_device(cfg.device)
-                        action_tensor = predict_action(
-                            observation=obs_frame,
-                            policy=ctx.policy,
-                            device=device,
-                            preprocessor=ctx.preprocessor,
-                            postprocessor=ctx.postprocessor,
-                            use_amp=ctx.policy.config.use_amp,
-                            task=task_str,
-                            robot_type=robot.robot_type,
-                        )
-                        robot_action = make_robot_action(action_tensor, dataset.features)
-                        action_t = torch.tensor([robot_action[k] for k in dataset_action_keys])
-                        interpolator.add(action_t)
-
-                    interp = interpolator.get()
-                    if interp is not None:
-                        robot_action = {k: interp[i].item() for i, k in enumerate(dataset_action_keys)}
-                        processed = ctx.robot_action_processor((robot_action, obs))
-                        robot.send_action(processed)
-                        last_action = processed
-                        action_frame = build_dataset_frame(dataset.features, robot_action, prefix=ACTION)
-                        if record_tick % record_stride == 0:
-                            frame = {**obs_frame, **action_frame, "task": task_str}
-                            if stream_online:
-                                dataset.add_frame(frame)
-                            else:
-                                frame_buffer.append(frame)
-                        record_tick += 1
+                        if stream_online:
+                            dataset.add_frame(frame)
+                        else:
+                            frame_buffer.append(frame)
+                    record_tick += 1
 
             dt = time.perf_counter() - loop_start
             if (sleep_t := control_interval - dt) > 0:

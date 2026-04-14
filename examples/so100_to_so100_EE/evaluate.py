@@ -222,7 +222,6 @@ def main():
 
             # Save episode
             dataset.save_episode()
-            episode_idx += 1
     finally:
         # Clean up
         log_say("Stop recording")

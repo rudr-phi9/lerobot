@@ -16,21 +16,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
+from threading import Event as ThreadingEvent
 
 from lerobot.datasets import VideoEncodingManager
 from lerobot.policies.rtc import ActionInterpolator
-from lerobot.policies.utils import make_robot_action
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
 from ..configs import HighlightStrategyConfig
 from ..context import RolloutContext
-from ..inference import InferenceEngine, _resolve_action_key_order
+from ..inference import InferenceEngine
 from ..ring_buffer import RolloutRingBuffer
-from . import RolloutStrategy
+from . import RolloutStrategy, infer_action
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +55,14 @@ class HighlightStrategy(RolloutStrategy):
     def __init__(self, config: HighlightStrategyConfig):
         super().__init__(config)
         self._engine: InferenceEngine | None = None
+        self._interpolator: ActionInterpolator | None = None
         self._ring: RolloutRingBuffer | None = None
         self._listener = None
-        self._save_requested = False
-        self._recording_live = False
+        self._save_requested = ThreadingEvent()
+        self._recording_live = ThreadingEvent()
 
     def setup(self, ctx: RolloutContext) -> None:
-        interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
+        self._interpolator = ActionInterpolator(multiplier=ctx.cfg.interpolation_multiplier)
 
         self._engine = InferenceEngine(
             policy=ctx.policy,
@@ -73,7 +75,6 @@ class HighlightStrategy(RolloutStrategy):
             task=ctx.cfg.task,
             fps=ctx.cfg.fps,
             device=ctx.cfg.device,
-            interpolator=interpolator,
             use_torch_compile=ctx.cfg.use_torch_compile,
             compile_warmup_inferences=ctx.cfg.compile_warmup_inferences,
         )
@@ -97,17 +98,12 @@ class HighlightStrategy(RolloutStrategy):
         cfg = ctx.cfg
         robot = ctx.robot_wrapper
         dataset = ctx.dataset
-        action_keys = ctx.action_keys
         ring = self._ring
+        interpolator = self._interpolator
 
-        interpolator = ActionInterpolator(multiplier=cfg.interpolation_multiplier)
         control_interval = interpolator.get_control_interval(cfg.fps)
-
-        policy_action_names = getattr(cfg.policy, "action_feature_names", None)
-        ordered_keys = _resolve_action_key_order(
-            list(policy_action_names) if policy_action_names else None,
-            action_keys,
-        )
+        ordered_keys = ctx.ordered_action_keys
+        features = dataset.features
 
         if engine.is_rtc:
             engine.resume()
@@ -126,70 +122,58 @@ class HighlightStrategy(RolloutStrategy):
 
                     obs = robot.get_observation()
                     obs_processed = ctx.robot_observation_processor(obs)
-                    action_dict = None
 
                     if engine.is_rtc:
                         engine.update_observation(obs_processed)
 
-                        if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
-                            dt = time.perf_counter() - loop_start
-                            if (sleep_t := control_interval - dt) > 0:
-                                precise_sleep(sleep_t)
-                            continue
+                    if cfg.use_torch_compile and not engine.compile_warmup_done.is_set():
+                        dt = time.perf_counter() - loop_start
+                        if (sleep_t := control_interval - dt) > 0:
+                            precise_sleep(sleep_t)
+                        continue
 
-                        if cfg.use_torch_compile and not warmup_flushed:
-                            engine.reset()
-                            interpolator.reset()
-                            warmup_flushed = True
+                    if cfg.use_torch_compile and not warmup_flushed:
+                        engine.reset()
+                        interpolator.reset()
+                        warmup_flushed = True
+                        if engine.is_rtc:
+                            engine.resume()
 
-                        if interpolator.needs_new_action():
-                            action_tensor = engine.consume_rtc_action()
-                            if action_tensor is not None:
-                                interpolator.add(action_tensor.cpu())
-
-                        interp = interpolator.get()
-                        if interp is not None:
-                            action_dict = {
-                                k: interp[i].item() for i, k in enumerate(ordered_keys) if i < len(interp)
-                            }
-                            processed = ctx.robot_action_processor((action_dict, obs))
-                            robot.send_action(processed)
-                    else:
-                        obs_frame = build_dataset_frame(ctx.dataset_features, obs_processed, prefix=OBS_STR)
-                        action_tensor = engine.get_action_sync(obs_frame)
-                        action_dict = make_robot_action(action_tensor, ctx.dataset_features)
-                        processed = ctx.robot_action_processor((action_dict, obs))
-                        robot.send_action(processed)
+                    action_dict = infer_action(
+                        engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
+                    )
 
                     # Build frame for ring buffer / live recording
                     if action_dict is not None:
-                        obs_frame = build_dataset_frame(ctx.dataset_features, obs_processed, prefix=OBS_STR)
-                        action_frame = build_dataset_frame(ctx.dataset_features, action_dict, prefix=ACTION)
+                        obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
+                        action_frame = build_dataset_frame(features, action_dict, prefix=ACTION)
                         frame = {**obs_frame, **action_frame, "task": task_str}
 
                         # Handle save key toggle
-                        if self._save_requested:
-                            self._save_requested = False
-                            if not self._recording_live:
+                        if self._save_requested.is_set():
+                            self._save_requested.clear()
+                            if not self._recording_live.is_set():
                                 logger.info(
                                     "Flushing ring buffer (%d frames) + starting live recording", len(ring)
                                 )
                                 for buffered_frame in ring.drain():
                                     dataset.add_frame(buffered_frame)
-                                self._recording_live = True
+                                self._recording_live.set()
                             else:
+                                # Save current frame as the last frame of the episode
                                 dataset.add_frame(frame)
                                 dataset.save_episode()
                                 logger.info("Episode saved")
-                                self._recording_live = False
+                                self._recording_live.clear()
                                 engine.reset()
                                 interpolator.reset()
                                 if engine.is_rtc:
                                     engine.resume()
 
-                        if self._recording_live:
+                        if self._recording_live.is_set():
                             dataset.add_frame(frame)
                         else:
+                            # Current frame goes into the ring buffer for next potential save.
                             ring.append(frame)
 
                     dt = time.perf_counter() - loop_start
@@ -197,11 +181,9 @@ class HighlightStrategy(RolloutStrategy):
                         precise_sleep(sleep_t)
 
             finally:
-                if self._recording_live:
-                    try:
+                if self._recording_live.is_set():
+                    with contextlib.suppress(Exception):
                         dataset.save_episode()
-                    except Exception:
-                        pass
 
     def teardown(self, ctx: RolloutContext) -> None:
         if self._engine is not None:
@@ -237,13 +219,11 @@ class HighlightStrategy(RolloutStrategy):
             save_key = self.config.save_key
 
             def on_press(key):
-                try:
+                with contextlib.suppress(Exception):
                     if hasattr(key, "char") and key.char == save_key:
-                        self._save_requested = True
+                        self._save_requested.set()
                     elif key == keyboard.Key.esc:
-                        self._save_requested = False
-                except Exception:
-                    pass
+                        self._save_requested.clear()
 
             self._listener = keyboard.Listener(on_press=on_press)
             self._listener.start()
