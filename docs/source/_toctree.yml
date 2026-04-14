@@ -81,6 +81,8 @@
     title: Meta-World
   - local: envhub_isaaclab_arena
     title: NVIDIA IsaacLab Arena Environments
+  - local: vlabench
+    title: VLABench
   title: "Benchmarks"
 - sections:
   - local: introduction_processors

@@ -40,7 +40,7 @@ from .converters import (
 )
 from .delta_action_processor import MapDeltaActionToRobotActionStep, MapTensorToDeltaActionDictStep
 from .device_processor import DeviceProcessorStep
-from .env_processor import IsaaclabArenaProcessorStep, LiberoProcessorStep
+from .env_processor import IsaaclabArenaProcessorStep, LiberoProcessorStep, VLABenchProcessorStep
 from .factory import (
     make_default_processors,
     make_default_robot_action_processor,
@@ -165,4 +165,5 @@ __all__ = [
     "to_relative_actions",
     "UnnormalizerProcessorStep",
     "VanillaObservationProcessorStep",
+    "VLABenchProcessorStep",
 ]

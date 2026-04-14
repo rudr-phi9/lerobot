@@ -1,0 +1,162 @@
+# VLABench
+
+VLABench is a large-scale benchmark for **language-conditioned robotic manipulation with long-horizon reasoning**. It provides 100 task categories across 2000+ objects, evaluating six dimensions of robot intelligence: mesh & texture understanding, spatial reasoning, world knowledge transfer, semantic instruction comprehension, physical law understanding, and long-horizon reasoning. VLABench is built on MuJoCo/dm_control and uses a Franka Panda 7-DOF arm.
+
+- Paper: [VLABench: A Large-Scale Benchmark for Language-Conditioned Robotics Manipulation with Long-Horizon Reasoning](https://arxiv.org/abs/2412.18194)
+- GitHub: [OpenMOSS/VLABench](https://github.com/OpenMOSS/VLABench)
+- Project website: [vlabench.github.io](https://vlabench.github.io)
+
+## Available tasks
+
+VLABench includes **two task suites** covering **100 task categories**:
+
+| Suite     | CLI name    | Tasks | Description                                                      |
+| --------- | ----------- | ----- | ---------------------------------------------------------------- |
+| Primitive | `primitive` | 21    | Single/few skill combinations (select, insert, physics QA)       |
+| Composite | `composite` | 22    | Multi-step reasoning and long-horizon planning (cook, rearrange) |
+
+### Primitive tasks
+
+Includes `select_fruit`, `select_toy`, `select_chemistry_tube`, `add_condiment`, `select_book`, `select_painting`, `select_drink`, `insert_flower`, `select_billiards`, `select_ingredient`, `select_mahjong`, `select_poker`, and physical reasoning tasks (`density_qa`, `friction_qa`, `magnetism_qa`, `reflection_qa`, `simple_cuestick_usage`, `simple_seesaw_usage`, `sound_speed_qa`, `thermal_expansion_qa`, `weight_qa`).
+
+### Composite tasks
+
+Includes `cluster_billiards`, `cluster_book`, `cluster_drink`, `cluster_toy`, `cook_dishes`, `cool_drink`, `find_unseen_object`, `get_coffee`, `hammer_nail`, `heat_food`, `make_juice`, `play_mahjong`, `play_math_game`, `play_poker`, `play_snooker`, `rearrange_book`, `rearrange_chemistry_tube`, `set_dining_table`, `set_study_table`, `store_food`, `take_chemistry_experiment`, `use_seesaw_complex`.
+
+### Evaluation tracks
+
+VLABench defines five standard evaluation tracks:
+
+| Track | Focus                         |
+| ----- | ----------------------------- |
+| 1     | In-distribution task learning |
+| 2     | Cross-category generalization |
+| 3     | Commonsense reasoning         |
+| 4     | Semantic instruction          |
+| 6     | Unseen texture robustness     |
+
+## Installation
+
+After following the LeRobot installation instructions:
+
+```bash
+pip install -e ".[vlabench]"
+```
+
+VLABench also requires downloading simulation assets:
+
+```bash
+# Clone the VLABench repo and download assets
+git clone https://github.com/OpenMOSS/VLABench.git
+cd VLABench
+python scripts/download_assets.py
+```
+
+<Tip>
+VLABench requires Linux (`sys_platform == 'linux'`) and Python 3.10+. Set the MuJoCo rendering backend before training or evaluation:
+
+```bash
+export MUJOCO_GL=egl  # for headless servers (HPC, cloud)
+```
+
+</Tip>
+
+## Evaluation
+
+### Default evaluation (recommended)
+
+Evaluate on a single task (10 episodes):
+
+```bash
+lerobot-eval \
+  --policy.path="your-policy-id" \
+  --env.type=vlabench \
+  --env.task=select_fruit \
+  --eval.batch_size=1 \
+  --eval.n_episodes=10
+```
+
+### Suite-wide evaluation
+
+Evaluate across all primitive tasks:
+
+```bash
+lerobot-eval \
+  --policy.path="your-policy-id" \
+  --env.type=vlabench \
+  --env.task=primitive \
+  --eval.batch_size=1 \
+  --eval.n_episodes=10 \
+  --env.max_parallel_tasks=1
+```
+
+### Multi-suite evaluation
+
+Evaluate across both primitive and composite suites:
+
+```bash
+lerobot-eval \
+  --policy.path="your-policy-id" \
+  --env.type=vlabench \
+  --env.task=primitive,composite \
+  --eval.batch_size=1 \
+  --eval.n_episodes=10 \
+  --env.max_parallel_tasks=1
+```
+
+### Individual task evaluation
+
+Evaluate on specific tasks by name:
+
+```bash
+lerobot-eval \
+  --policy.path="your-policy-id" \
+  --env.type=vlabench \
+  --env.task=select_fruit,heat_food \
+  --eval.batch_size=1 \
+  --eval.n_episodes=10
+```
+
+## Policy inputs and outputs
+
+**Observations:**
+
+- `observation.state` — 7-dim end-effector state (position xyz, euler xyz, gripper)
+- `observation.images.image` — front camera view, 480x480 HWC uint8
+- `observation.images.second_image` — second camera view, 480x480 HWC uint8
+- `observation.images.wrist_image` — wrist camera view, 480x480 HWC uint8
+
+**Actions:**
+
+- Continuous control in `Box(-1, 1, shape=(7,))` — 3D position + 3D euler orientation + 1D gripper
+
+### Recommended evaluation episodes
+
+For reproducible benchmarking, use **10 episodes per task**. For the full primitive suite this gives 210 episodes; for the full composite suite, 220 episodes.
+
+## Training
+
+### Datasets
+
+Pre-collected VLABench datasets in LeRobot format are available on the Hugging Face Hub:
+
+- Primitive tasks: [VLABench/vlabench_primitive_ft_lerobot_video](https://huggingface.co/datasets/VLABench/vlabench_primitive_ft_lerobot_video) (5,000 episodes, 128 tasks, 480x480 images)
+- Composite tasks: [VLABench/vlabench_composite_ft_lerobot_video](https://huggingface.co/datasets/VLABench/vlabench_composite_ft_lerobot_video) (5,977 episodes, 167 tasks, 224x224 images)
+
+### Example training command
+
+```bash
+lerobot-train \
+  --policy.type=smolvla \
+  --policy.repo_id=${HF_USER}/vlabench-test \
+  --policy.load_vlm_weights=true \
+  --dataset.repo_id=VLABench/vlabench_primitive_ft_lerobot_video \
+  --env.type=vlabench \
+  --env.task=select_fruit \
+  --output_dir=./outputs/ \
+  --steps=100000 \
+  --batch_size=4 \
+  --eval.batch_size=1 \
+  --eval.n_episodes=1 \
+  --eval_freq=1000
+```
