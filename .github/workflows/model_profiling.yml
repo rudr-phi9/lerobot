@@ -103,7 +103,7 @@ jobs:
             -e UV_PROJECT_ENVIRONMENT=/tmp/lerobot-venv \
             -e UV_CACHE_DIR=/tmp/uv-cache \
             -e XDG_CACHE_HOME=/tmp/xdg-cache \
-            -e HOST_GIT_COMMIT="${{ github.event.pull_request.head.sha || github.event.inputs.git_commit || github.sha }}"
+            -e HOST_GIT_COMMIT="${{ github.event.pull_request.head.sha || github.event.inputs.git_commit || github.sha }}" \
             -e HF_USER_TOKEN="${HF_USER_TOKEN}" \
             -e HF_TOKEN="${HF_USER_TOKEN}" \
             -e PROFILE_MODE="${PROFILE_MODE}" \
