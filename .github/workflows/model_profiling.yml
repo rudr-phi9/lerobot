@@ -123,7 +123,62 @@ jobs:
                 hf auth login --token "${HF_USER_TOKEN}" --add-to-git-credential 2>/dev/null || true
               fi
 
-              uv sync --locked --extra all
+              policies_for_install=()
+              if [[ -n "${POLICY_FILTER}" ]]; then
+                IFS="," read -ra policies_for_install <<< "${POLICY_FILTER}"
+              else
+                policies_for_install=(act diffusion groot multi_task_dit pi0 pi0_fast pi05 smolvla wall_x xvla)
+              fi
+
+              extras=(training test)
+              add_extra() {
+                local extra="$1"
+                for existing in "${extras[@]}"; do
+                  if [[ "${existing}" == "${extra}" ]]; then
+                    return
+                  fi
+                done
+                extras+=("${extra}")
+              }
+
+              for policy in "${policies_for_install[@]}"; do
+                policy="$(echo "${policy}" | xargs)"
+                case "${policy}" in
+                  act)
+                    ;;
+                  diffusion)
+                    add_extra diffusion
+                    ;;
+                  groot)
+                    add_extra groot
+                    ;;
+                  multi_task_dit)
+                    add_extra multi_task_dit
+                    ;;
+                  pi0|pi0_fast|pi05)
+                    add_extra pi
+                    ;;
+                  smolvla)
+                    add_extra smolvla
+                    ;;
+                  wall_x)
+                    add_extra wallx
+                    ;;
+                  xvla)
+                    add_extra xvla
+                    ;;
+                  *)
+                    echo "Unknown profiling policy '${policy}'" >&2
+                    exit 1
+                    ;;
+                esac
+              done
+
+              sync_cmd=(uv sync --locked)
+              for extra in "${extras[@]}"; do
+                sync_cmd+=(--extra "${extra}")
+              done
+              "${sync_cmd[@]}"
 
               cmd=(
                 uv run python scripts/ci/run_model_profiling.py
