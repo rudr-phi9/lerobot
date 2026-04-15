@@ -98,6 +98,7 @@ jobs:
           set -eux
           mkdir -p profiling-results
           docker run --rm --gpus all \
+            --user "$(id -u):$(id -g)" \
             --shm-size=16g \
             -e HF_HOME=/tmp/hf \
             -e UV_PROJECT_ENVIRONMENT=/tmp/lerobot-venv \
