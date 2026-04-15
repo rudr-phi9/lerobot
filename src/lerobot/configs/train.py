@@ -56,6 +56,16 @@ class TrainPipelineConfig(HubMixin):
     # Number of workers for the dataloader.
     num_workers: int = 4
     batch_size: int = 8
+    profile_mode: str = "off"
+    profile_wait_steps: int = 1
+    profile_warmup_steps: int = 2
+    profile_active_steps: int = 6
+    profile_repeat: int = 1
+    profile_output_dir: Path | None = None
+    profile_record_shapes: bool = True
+    profile_with_memory: bool = True
+    profile_with_flops: bool = True
+    profile_with_stack: bool = False
     steps: int = 100_000
     eval_freq: int = 20_000
     log_freq: int = 200
@@ -128,9 +138,19 @@ class TrainPipelineConfig(HubMixin):
             now = dt.datetime.now()
             train_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
             self.output_dir = Path("outputs/train") / train_dir
+        if self.profile_mode != "off" and self.profile_output_dir is None:
+            self.profile_output_dir = self.output_dir / "profiling"
 
         if isinstance(self.dataset.repo_id, list):
             raise NotImplementedError("LeRobotMultiDataset is not currently implemented.")
+        if self.profile_mode not in {"off", "summary", "trace"}:
+            raise ValueError(
+                f"`profile_mode` must be one of 'off', 'summary', or 'trace', got {self.profile_mode}."
+            )
+        if self.profile_wait_steps < 0 or self.profile_warmup_steps < 0 or self.profile_active_steps < 0:
+            raise ValueError("Profiler schedule steps must be non-negative.")
+        if self.profile_repeat <= 0:
+            raise ValueError("`profile_repeat` must be strictly positive.")
 
         if not self.use_policy_training_preset and (self.optimizer is None or self.scheduler is None):
             raise ValueError("Optimizer and Scheduler must be set when the policy presets are not used.")

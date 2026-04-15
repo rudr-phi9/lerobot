@@ -1,0 +1,128 @@
+{
+  "act": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/pusht",
+      "--dataset.episodes=[0]",
+      "--policy.type=act",
+      "--policy.device=cuda",
+      "--batch_size=4"
+    ]
+  },
+  "diffusion": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/pusht",
+      "--dataset.episodes=[0]",
+      "--policy.type=diffusion",
+      "--policy.device=cuda",
+      "--batch_size=4"
+    ]
+  },
+  "groot": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.type=groot",
+      "--policy.base_model_path=nvidia/GR00T-N1.5-3B",
+      "--policy.tune_diffusion_model=true",
+      "--policy.tune_projector=true",
+      "--policy.tune_llm=false",
+      "--policy.tune_visual=false",
+      "--policy.use_bf16=true",
+      "--policy.device=cuda",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  },
+  "multi_task_dit": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/pusht",
+      "--dataset.episodes=[0]",
+      "--policy.type=multi_task_dit",
+      "--policy.device=cuda",
+      "--policy.horizon=32",
+      "--policy.n_action_steps=30",
+      "--batch_size=4"
+    ]
+  },
+  "pi0": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.path=lerobot/pi0_base",
+      "--policy.device=cuda",
+      "--policy.n_action_steps=30",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  },
+  "pi0_fast": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.path=lerobot/pi0fast-base",
+      "--policy.device=cuda",
+      "--policy.n_action_steps=30",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  },
+  "pi05": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.path=lerobot/pi05_base",
+      "--policy.device=cuda",
+      "--policy.n_action_steps=30",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  },
+  "smolvla": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.path=lerobot/smolvla_base",
+      "--policy.load_vlm_weights=true",
+      "--policy.freeze_vision_encoder=false",
+      "--policy.train_expert_only=false",
+      "--policy.empty_cameras=1",
+      "--policy.device=cuda",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  },
+  "wall_x": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/aloha_sim_insertion_human",
+      "--dataset.episodes=[0]",
+      "--policy.type=wall_x",
+      "--policy.pretrained_name_or_path=x-square-robot/wall-oss-flow",
+      "--policy.prediction_mode=diffusion",
+      "--policy.attn_implementation=eager",
+      "--policy.device=cuda",
+      "--batch_size=1"
+    ]
+  },
+  "xvla": {
+    "steps": 12,
+    "train_args": [
+      "--dataset.repo_id=lerobot/libero_plus",
+      "--dataset.episodes=[0]",
+      "--policy.path=lerobot/xvla-widowx",
+      "--policy.action_mode=auto",
+      "--policy.empty_cameras=1",
+      "--policy.device=cuda",
+      "--batch_size=1",
+      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+    ]
+  }
+}
