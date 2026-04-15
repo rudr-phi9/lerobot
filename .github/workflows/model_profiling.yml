@@ -100,9 +100,12 @@ jobs:
           docker run --rm --gpus all \
             --user "$(id -u):$(id -g)" \
             --shm-size=16g \
+            -e HOME=/tmp/lerobot-home \
             -e HF_HOME=/tmp/hf \
             -e UV_PROJECT_ENVIRONMENT=/tmp/lerobot-venv \
             -e UV_CACHE_DIR=/tmp/uv-cache \
+            -e UV_PYTHON_PREFERENCE=only-system \
+            -e XDG_DATA_HOME=/tmp/xdg-data \
             -e XDG_CACHE_HOME=/tmp/xdg-cache \
             -e HOST_GIT_COMMIT="${{ github.event.pull_request.head.sha || github.event.inputs.git_commit || github.sha }}" \
             -e HF_USER_TOKEN="${HF_USER_TOKEN}" \
@@ -114,8 +117,9 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             huggingface/lerobot-gpu:latest \
-            bash -lc '
+            bash -c '
               set -euxo pipefail
+              mkdir -p "${HOME}" "${HF_HOME}" "${UV_CACHE_DIR}" "${XDG_CACHE_HOME}" "${XDG_DATA_HOME}"
               rm -rf /tmp/lerobot-src
               cp -a /workspace/. /tmp/lerobot-src
               cd /tmp/lerobot-src
