@@ -22,6 +22,7 @@ import pytest
 import torch
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("grpc")
 
 from torch.multiprocessing import Event, Queue
 
