@@ -16,13 +16,9 @@
 
 from __future__ import annotations
 
-import cProfile
 import hashlib
-import io
 import json
-import pstats
 import statistics
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from numbers import Real
 from pathlib import Path
@@ -35,15 +31,6 @@ from torch.utils.data._utils.collate import default_collate
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def render_cprofile_summary(
-    profile: cProfile.Profile, *, sort_by: str = "cumulative", limit: int = 40
-) -> str:
-    output = io.StringIO()
-    stats = pstats.Stats(profile, stream=output).strip_dirs().sort_stats(sort_by)
-    stats.print_stats(limit)
-    return output.getvalue()
 
 
 def write_profiler_table(
@@ -101,26 +88,6 @@ def write_torch_profiler_outputs(
         write_profiler_table(profiler, tables_dir / "cuda_memory.txt", sort_by="self_cuda_memory_usage")
     write_profiler_table(profiler, tables_dir / "cpu_memory.txt", sort_by="self_cpu_memory_usage")
     write_profiler_table(profiler, tables_dir / "flops.txt", sort_by="flops")
-
-
-def run_with_cprofile[T](
-    label: str,
-    output_dir: Path,
-    fn: Callable[..., T],
-    *args: Any,
-    sort_by: str = "cumulative",
-    limit: int = 40,
-    **kwargs: Any,
-) -> T:
-    ensure_dir(output_dir)
-    profile = cProfile.Profile()
-    profile.enable()
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        profile.disable()
-        summary = render_cprofile_summary(profile, sort_by=sort_by, limit=limit)
-        (output_dir / f"{label}.txt").write_text(summary)
 
 
 def _stable_float(value: float | int | None) -> float | None:

@@ -54,7 +54,6 @@ from lerobot.utils.profiling_utils import (
     StepTimingCollector,
     ensure_dir,
     make_torch_profiler,
-    run_with_cprofile,
     write_deterministic_forward_artifacts,
     write_torch_profiler_outputs,
 )
@@ -231,10 +230,8 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
 
     profiling_enabled = cfg.profile_mode != "off"
     profile_output_dir = None
-    cprofile_dir = None
     if profiling_enabled and is_main_process and cfg.profile_output_dir is not None:
         profile_output_dir = ensure_dir(Path(cfg.profile_output_dir))
-        cprofile_dir = ensure_dir(profile_output_dir / "cprofile")
         logging.info("Profiling enabled. Artifacts will be written to %s", profile_output_dir)
 
     # Initialize wandb only on main process
@@ -260,10 +257,7 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
     # Dataset loading synchronization: main process downloads first to avoid race conditions
     if is_main_process:
         logging.info("Creating dataset")
-        if cprofile_dir is not None:
-            dataset = run_with_cprofile("dataset_setup", cprofile_dir, make_dataset, cfg)
-        else:
-            dataset = make_dataset(cfg)
+        dataset = make_dataset(cfg)
 
     accelerator.wait_for_everyone()
 
@@ -281,21 +275,11 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
 
     if is_main_process:
         logging.info("Creating policy")
-    if is_main_process and cprofile_dir is not None:
-        policy = run_with_cprofile(
-            "policy_setup",
-            cprofile_dir,
-            make_policy,
-            cfg=cfg.policy,
-            ds_meta=dataset.meta,
-            rename_map=cfg.rename_map,
-        )
-    else:
-        policy = make_policy(
-            cfg=cfg.policy,
-            ds_meta=dataset.meta,
-            rename_map=cfg.rename_map,
-        )
+    policy = make_policy(
+        cfg=cfg.policy,
+        ds_meta=dataset.meta,
+        rename_map=cfg.rename_map,
+    )
 
     if cfg.peft is not None:
         logging.info("Using PEFT! Wrapping model.")
@@ -349,36 +333,16 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
             },
         }
 
-    if is_main_process and cprofile_dir is not None:
-        preprocessor, postprocessor = run_with_cprofile(
-            "processor_setup",
-            cprofile_dir,
-            make_pre_post_processors,
-            policy_cfg=cfg.policy,
-            pretrained_path=processor_pretrained_path,
-            **processor_kwargs,
-            **postprocessor_kwargs,
-        )
-    else:
-        preprocessor, postprocessor = make_pre_post_processors(
-            policy_cfg=cfg.policy,
-            pretrained_path=processor_pretrained_path,
-            **processor_kwargs,
-            **postprocessor_kwargs,
-        )
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg.policy,
+        pretrained_path=processor_pretrained_path,
+        **processor_kwargs,
+        **postprocessor_kwargs,
+    )
 
     if is_main_process:
         logging.info("Creating optimizer and scheduler")
-    if is_main_process and cprofile_dir is not None:
-        optimizer, lr_scheduler = run_with_cprofile(
-            "optimizer_setup",
-            cprofile_dir,
-            make_optimizer_and_scheduler,
-            cfg,
-            policy,
-        )
-    else:
-        optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
+    optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
 
     if profiling_enabled and is_main_process and profile_output_dir is not None:
         logging.info("Recording deterministic forward-pass artifacts")

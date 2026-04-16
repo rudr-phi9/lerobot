@@ -106,18 +106,16 @@ def test_build_train_command_includes_profiling_outputs(tmp_path):
     assert "--cudnn_deterministic=true" in cmd
 
 
-def test_build_artifact_index_collects_cprofile_tables_and_traces(tmp_path):
+def test_build_artifact_index_collects_tables_and_traces(tmp_path):
     module = _import_model_profiling_script()
     run_dir = tmp_path / "act" / "20260415T000000Z__act"
     profiling_dir = run_dir / "profiling"
-    (profiling_dir / "cprofile").mkdir(parents=True, exist_ok=True)
     (profiling_dir / "torch_tables").mkdir(parents=True, exist_ok=True)
     (profiling_dir / "torch_traces").mkdir(parents=True, exist_ok=True)
     (profiling_dir / "step_timing_summary.json").write_text("{}")
     (profiling_dir / "deterministic_forward.json").write_text(
         json.dumps({"operator_fingerprint": "ops123", "output_fingerprint": "out123"})
     )
-    (profiling_dir / "cprofile" / "policy_setup.txt").write_text("policy setup")
     (profiling_dir / "torch_tables" / "cpu_time_total.txt").write_text("cpu table")
     (profiling_dir / "torch_traces" / "trace_step_9.json").write_text("{}")
     (run_dir / "stdout.txt").write_text("stdout")
@@ -133,14 +131,13 @@ def test_build_artifact_index_collects_cprofile_tables_and_traces(tmp_path):
     assert row_path_in_repo == "rows/act/20260415T000000Z__act.json"
     assert artifact_paths["stdout"].endswith("/stdout.txt")
     assert artifact_paths["step_timing_summary"].endswith("/profiling/step_timing_summary.json")
-    assert "policy_setup" in artifact_paths["cprofile_summaries"]
     assert "cpu_time_total.txt" in artifact_paths["torch_tables"]
     assert "trace_step_9.json" in artifact_paths["trace_files"]
     assert artifact_paths["profiling_files"]["profiling/deterministic_forward.json"].endswith(
         "/profiling/deterministic_forward.json"
     )
     assert artifact_urls["row"].startswith("https://huggingface.co/datasets/lerobot/model-profiling-history/")
-    assert len(targets) == 7
+    assert len(targets) == 6
 
 
 def test_upload_targets_batches_preview_publish_into_single_hf_pr(monkeypatch, tmp_path):
@@ -222,7 +219,6 @@ def test_model_profiling_main_smoke_writes_row(monkeypatch, tmp_path):
         profile_dir = Path(
             next(arg.split("=", 1)[1] for arg in cmd if arg.startswith("--profile_output_dir="))
         )
-        (profile_dir / "cprofile").mkdir(parents=True, exist_ok=True)
         (profile_dir / "torch_tables").mkdir(parents=True, exist_ok=True)
         (profile_dir / "step_timing_summary.json").write_text(
             json.dumps(
@@ -241,7 +237,6 @@ def test_model_profiling_main_smoke_writes_row(monkeypatch, tmp_path):
                 }
             )
         )
-        (profile_dir / "cprofile" / "policy_setup.txt").write_text("policy setup profile")
         (profile_dir / "torch_tables" / "cpu_time_total.txt").write_text("cpu time table")
         return subprocess.CompletedProcess(cmd, 0, "stdout ok", "")
 
@@ -259,7 +254,6 @@ def test_model_profiling_main_smoke_writes_row(monkeypatch, tmp_path):
     assert row["pr_number"] == 3389
     assert row["step_timing_summary"]["forward_s"]["mean"] == 0.1
     assert row["deterministic_forward"]["operator_fingerprint"] == "ops-fingerprint"
-    assert "policy_setup" in row["artifact_paths"]["cprofile_summaries"]
 
 
 def test_model_profiling_publish_failure_is_recorded_without_failing(monkeypatch, tmp_path):

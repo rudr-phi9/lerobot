@@ -184,14 +184,12 @@ def build_artifact_index(
     artifact_paths: dict[str, Any] = {
         "row": row_path_in_repo,
         "profiling_files": {},
-        "cprofile_summaries": {},
         "torch_tables": {},
         "trace_files": {},
     }
     artifact_urls: dict[str, Any] = {
         "row": make_hub_file_url(repo_id, row_path_in_repo),
         "profiling_files": {},
-        "cprofile_summaries": {},
         "torch_tables": {},
         "trace_files": {},
     }
@@ -219,9 +217,6 @@ def build_artifact_index(
         if path.name == "step_timing_summary.json":
             artifact_paths["step_timing_summary"] = repo_path
             artifact_urls["step_timing_summary"] = make_hub_file_url(repo_id, repo_path)
-        elif "cprofile" in path.parts:
-            artifact_paths["cprofile_summaries"][path.stem] = repo_path
-            artifact_urls["cprofile_summaries"][path.stem] = make_hub_file_url(repo_id, repo_path)
         elif "torch_tables" in path.parts:
             artifact_paths["torch_tables"][path.name] = repo_path
             artifact_urls["torch_tables"][path.name] = make_hub_file_url(repo_id, repo_path)
