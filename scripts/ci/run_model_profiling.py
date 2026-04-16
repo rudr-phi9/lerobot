@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from huggingface_hub import CommitOperationAdd, HfApi
+from huggingface_hub.errors import HfHubHTTPError
 
 
 @dataclass(frozen=True)
@@ -315,16 +316,22 @@ def main() -> int:
         row_path.write_text(json.dumps(row, indent=2, sort_keys=True))
 
         if args.publish:
-            upload_result = upload_profile_run(
-                repo_id=repo_id,
-                row_path=row_path,
-                row_path_in_repo=row_path_in_repo,
-                artifact_targets=artifact_targets,
-                create_pr=pr_number is not None,
-            )
-            row["uploaded_paths"] = upload_result.uploaded_paths
-            row["publish_pr_url"] = upload_result.pr_url
-            row["publish_pr_number"] = parse_discussion_num(upload_result.pr_url)
+            try:
+                upload_result = upload_profile_run(
+                    repo_id=repo_id,
+                    row_path=row_path,
+                    row_path_in_repo=row_path_in_repo,
+                    artifact_targets=artifact_targets,
+                    create_pr=pr_number is not None,
+                )
+            except HfHubHTTPError as exc:
+                row["publish_status"] = "failed"
+                row["publish_error"] = str(exc)
+            else:
+                row["publish_status"] = "success"
+                row["uploaded_paths"] = upload_result.uploaded_paths
+                row["publish_pr_url"] = upload_result.pr_url
+                row["publish_pr_number"] = parse_discussion_num(upload_result.pr_url)
             row_path.write_text(json.dumps(row, indent=2, sort_keys=True))
 
         print(json.dumps(row, indent=2, sort_keys=True))
