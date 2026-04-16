@@ -359,13 +359,14 @@ jobs:
             bash -c "
               hf auth login --token \"\$HF_USER_TOKEN\" --add-to-git-credential 2>/dev/null || true
               lerobot-eval \
-                --policy.path=your-vlabench-policy \
+                --policy.path=lerobot/smolvla_vlabench \
                 --env.type=vlabench \
                 --env.task=select_fruit \
                 --eval.batch_size=1 \
                 --eval.n_episodes=1 \
                 --eval.use_async_envs=false \
                 --policy.device=cuda \
+                '--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.second_image\": \"observation.images.camera2\", \"observation.images.wrist_image\": \"observation.images.camera3\"}' \
                 --output_dir=/tmp/eval-artifacts
             "
 
@@ -383,7 +384,7 @@ jobs:
             --artifacts-dir /tmp/vlabench-artifacts \
             --env vlabench \
             --task select_fruit \
-            --policy your-vlabench-policy
+            --policy lerobot/smolvla_vlabench
 
       - name: Upload VLABench rollout video
         if: always()
