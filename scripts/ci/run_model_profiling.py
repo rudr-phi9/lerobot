@@ -61,12 +61,6 @@ def upload_targets(
     commit_message: str | None = None,
 ) -> dict[str, str]:
     api = HfApi(token=token)
-    try:
-        repo_exists = api.repo_exists(repo_id=repo_id, repo_type=repo_type)
-    except Exception:
-        repo_exists = True
-    if not repo_exists:
-        api.create_repo(repo_id=repo_id, repo_type=repo_type, private=private, exist_ok=True)
     uploaded: dict[str, str] = {}
     for target in targets:
         api.upload_file(
