@@ -29,7 +29,7 @@ FROM huggingface/lerobot-gpu:latest
 RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
     uv pip install --no-cache -e ~/VLABench \
       mujoco==3.2.2 dm-control==1.0.22 \
-      open3d==0.18.0 colorlog scikit-learn
+      open3d colorlog scikit-learn
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
