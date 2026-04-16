@@ -26,7 +26,17 @@ FROM huggingface/lerobot-gpu:latest
 # find_packages() omits it from wheels; editable mode uses the source tree directly.
 # Asset download (Google Drive via gdown) is skipped — unreliable in CI and not
 # needed for our smoke test which uses its own eval pipeline.
+# Patch: constant.py calls os.listdir on ~100 asset/obj/meshes/* dirs at import
+# time; those dirs only exist after the Google Drive download. We guard the call
+# so missing dirs return [] instead of crashing.
 RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
+    python3 -c "\
+import pathlib; \
+p = pathlib.Path.home() / 'VLABench/VLABench/configs/constant.py'; \
+t = p.read_text(); \
+p.write_text(t.replace( \
+    'subdirs = os.listdir(xml_dir)', \
+    'if not os.path.isdir(xml_dir): return []\n    subdirs = os.listdir(xml_dir)'))" && \
     uv pip install --no-cache -e ~/VLABench \
       mujoco==3.2.2 dm-control==1.0.22 \
       open3d colorlog scikit-learn
