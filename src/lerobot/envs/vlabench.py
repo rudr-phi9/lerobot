@@ -237,11 +237,16 @@ class VLABenchEnv(gym.Env):
                     else:  # HWC
                         images["image"] = rgb.astype(np.uint8)
 
-        # Fill missing cameras with zeros
+        # VLABench's native render size may not match our declared observation_space.
+        # Resize each image to (h, w) so gymnasium's vector env concatenate succeeds.
         h, w = self.render_resolution
         for key in ["image", "second_image", "wrist_image"]:
             if key not in images:
                 images[key] = np.zeros((h, w, 3), dtype=np.uint8)
+            elif images[key].shape[:2] != (h, w):
+                import cv2
+
+                images[key] = cv2.resize(images[key], (w, h), interpolation=cv2.INTER_AREA).astype(np.uint8)
 
         # Extract end-effector state
         ee_state = obs.get("ee_state", np.zeros(7, dtype=np.float64))
