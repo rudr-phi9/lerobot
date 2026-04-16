@@ -97,6 +97,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--profile_mode", choices=["summary", "trace"], default="trace")
     parser.add_argument("--git_commit", default="")
+    parser.add_argument("--git_ref", default="")
+    parser.add_argument("--pr_number", default="")
     return parser.parse_args()
 
 
@@ -221,6 +223,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     repo_id = normalize_repo_id(args.results_repo, args.hub_org)
     git_commit = args.git_commit or subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    pr_number = int(args.pr_number) if str(args.pr_number).strip() else None
 
     for policy_name in selected:
         spec = specs[policy_name]
@@ -254,6 +257,8 @@ def main() -> int:
             "run_id": run_id,
             "policy": policy_name,
             "git_commit": git_commit,
+            "git_ref": args.git_ref or None,
+            "pr_number": pr_number,
             "status": "success" if result.returncode == 0 else "failed",
             "return_code": result.returncode,
             "profile_mode": args.profile_mode,

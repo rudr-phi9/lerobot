@@ -139,6 +139,8 @@ def test_model_profiling_main_smoke_writes_row(monkeypatch, tmp_path):
         publish=False,
         profile_mode="summary",
         git_commit="",
+        git_ref="codex/model-profiling",
+        pr_number="3389",
     )
 
     monkeypatch.setattr(module, "parse_args", lambda: args)
@@ -183,6 +185,8 @@ def test_model_profiling_main_smoke_writes_row(monkeypatch, tmp_path):
     assert row["policy"] == "act"
     assert row["status"] == "success"
     assert row["git_commit"] == "deadbeef"
+    assert row["git_ref"] == "codex/model-profiling"
+    assert row["pr_number"] == 3389
     assert row["step_timing_summary"]["forward_s"]["mean"] == 0.1
     assert row["deterministic_forward"]["operator_fingerprint"] == "ops-fingerprint"
     assert "policy_setup" in row["artifact_paths"]["cprofile_summaries"]

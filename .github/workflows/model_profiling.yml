@@ -81,8 +81,8 @@ jobs:
       HF_USER_TOKEN: ${{ secrets.LEROBOT_HF_USER }}
       PROFILE_MODE: ${{ github.event_name == 'pull_request' && 'summary' || github.event.inputs.profile_mode || 'trace' }}
       POLICY_FILTER: ${{ github.event_name == 'pull_request' && 'act' || github.event.inputs.policies || '' }}
-      RESULTS_REPO: ${{ github.event.inputs.results_repo || 'model-profiling-history' }}
-      SHOULD_PUBLISH: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_results == 'true') }}
+      RESULTS_REPO: ${{ github.event_name == 'pull_request' && 'model-profiling-history-preview' || github.event.inputs.results_repo || 'model-profiling-history' }}
+      SHOULD_PUBLISH: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_results == 'true') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -195,6 +195,8 @@ jobs:
                 --results_repo="${RESULTS_REPO}"
                 --profile_mode="${PROFILE_MODE}"
                 --git_commit="${HOST_GIT_COMMIT}"
+                --git_ref="${{ github.head_ref || github.ref_name || github.event.inputs.git_ref || 'main' }}"
+                --pr_number="${{ github.event.pull_request.number || '' }}"
               )
 
               if [[ -n "${POLICY_FILTER}" ]]; then
