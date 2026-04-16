@@ -24,8 +24,8 @@ FROM huggingface/lerobot-gpu:latest
 # Shallow-clone without submodule recursion (nested SSH-only submodules fail in CI).
 # Editable install (-e) because VLABench/utils/ has no __init__.py, so
 # find_packages() omits it from wheels; editable mode uses the source tree directly.
-RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git /opt/VLABench && \
-    uv pip install --no-cache -e /opt/VLABench mujoco==3.2.2 dm-control==1.0.22 && \
+RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
+    uv pip install --no-cache -e ~/VLABench mujoco==3.2.2 dm-control==1.0.22 && \
     python -c "from VLABench.utils import download_assets; download_assets()"
 
 # Overlay the PR's source code on top of the nightly image.
