@@ -216,37 +216,51 @@ class VLABenchEnv(gym.Env):
         assert self._env is not None
 
         obs = self._env.get_observation()
+        h, w = self.render_resolution
+
+        def _to_hwc3(arr: np.ndarray) -> np.ndarray:
+            """Coerce any camera array to the declared (h, w, 3) uint8 shape."""
+            import cv2
+
+            a = np.asarray(arr)
+            # Drop a leading singleton batch dim if present.
+            while a.ndim > 3 and a.shape[0] == 1:
+                a = a[0]
+            if a.ndim == 3 and a.shape[0] in (1, 3, 4) and a.shape[-1] not in (1, 3, 4):
+                # CHW → HWC
+                a = np.transpose(a, (1, 2, 0))
+            if a.ndim == 2:
+                a = np.stack([a] * 3, axis=-1)
+            if a.ndim != 3:
+                return np.zeros((h, w, 3), dtype=np.uint8)
+            # Force 3 channels.
+            if a.shape[-1] == 1:
+                a = np.repeat(a, 3, axis=-1)
+            elif a.shape[-1] == 4:
+                a = a[..., :3]
+            elif a.shape[-1] != 3:
+                return np.zeros((h, w, 3), dtype=np.uint8)
+            if a.shape[:2] != (h, w):
+                a = cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA)
+            return a.astype(np.uint8)
 
         # Extract camera images — VLABench returns (n_cameras, C, H, W) or individual arrays
-        images = {}
+        raw_frames: list[np.ndarray] = []
         if "rgb" in obs:
             rgb = obs["rgb"]
             if isinstance(rgb, np.ndarray):
                 if rgb.ndim == 4:
-                    # (n_cameras, C, H, W) → transpose each to (H, W, C)
-                    if rgb.shape[0] >= 1:
-                        images["image"] = np.transpose(rgb[0], (1, 2, 0)).astype(np.uint8)
-                    if rgb.shape[0] >= 2:
-                        images["second_image"] = np.transpose(rgb[1], (1, 2, 0)).astype(np.uint8)
-                    if rgb.shape[0] >= 3:
-                        images["wrist_image"] = np.transpose(rgb[2], (1, 2, 0)).astype(np.uint8)
+                    raw_frames = [rgb[i] for i in range(rgb.shape[0])]
                 elif rgb.ndim == 3:
-                    # Single camera (C, H, W) or (H, W, C)
-                    if rgb.shape[0] == 3:  # CHW
-                        images["image"] = np.transpose(rgb, (1, 2, 0)).astype(np.uint8)
-                    else:  # HWC
-                        images["image"] = rgb.astype(np.uint8)
+                    raw_frames = [rgb]
 
-        # VLABench's native render size may not match our declared observation_space.
-        # Resize each image to (h, w) so gymnasium's vector env concatenate succeeds.
-        h, w = self.render_resolution
-        for key in ["image", "second_image", "wrist_image"]:
-            if key not in images:
+        image_keys = ["image", "second_image", "wrist_image"]
+        images: dict[str, np.ndarray] = {}
+        for i, key in enumerate(image_keys):
+            if i < len(raw_frames):
+                images[key] = _to_hwc3(raw_frames[i])
+            else:
                 images[key] = np.zeros((h, w, 3), dtype=np.uint8)
-            elif images[key].shape[:2] != (h, w):
-                import cv2
-
-                images[key] = cv2.resize(images[key], (w, h), interpolation=cv2.INTER_AREA).astype(np.uint8)
 
         # Extract end-effector state — coerce to exactly (7,) so vector env concat
         # doesn't fail with shape-mismatch on buffer np.stack.
