@@ -24,11 +24,10 @@ FROM huggingface/lerobot-gpu:latest
 # Shallow-clone without submodule recursion (nested SSH-only submodules fail in CI).
 # Editable install (-e) because VLABench/utils/ has no __init__.py, so
 # find_packages() omits it from wheels; editable mode uses the source tree directly.
-# Asset download (Google Drive via gdown) is skipped — unreliable in CI and not
-# needed for our smoke test which uses its own eval pipeline.
+# rrt-algorithms has the same packaging issue (rrt/ dir missing __init__.py).
 # Patch: constant.py calls os.listdir on ~100 asset/obj/meshes/* dirs at import
-# time; those dirs only exist after the Google Drive download. We guard the call
-# so missing dirs return [] instead of crashing.
+# time. Guard the call so missing dirs return [] instead of crashing (in case
+# the asset download is partial).
 RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
     git clone --depth 1 https://github.com/motion-planning/rrt-algorithms.git ~/rrt-algorithms && \
     python3 -c "\
@@ -40,7 +39,13 @@ p.write_text(t.replace( \
     'if not os.path.isdir(xml_dir): return []\n    subdirs = os.listdir(xml_dir)'))" && \
     uv pip install --no-cache -e ~/VLABench -e ~/rrt-algorithms \
       mujoco==3.2.2 dm-control==1.0.22 \
-      open3d colorlog scikit-learn openai
+      open3d colorlog scikit-learn openai gdown
+
+# Download VLABench mesh assets from Google Drive. Task configs reference
+# object meshes (obj/meshes/fruit/, containers/basket/, etc.); without them
+# the task builder crashes with IndexError on random.choice([]).
+# gdown handles Google Drive's confirmation tokens for large files.
+RUN python ~/VLABench/scripts/download_assets.py --choice all
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
