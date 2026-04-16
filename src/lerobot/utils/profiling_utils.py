@@ -22,14 +22,15 @@ import io
 import json
 import pstats
 import statistics
-from numbers import Real
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
 import torch
 from torch.utils.data._utils.collate import default_collate
+
 
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
