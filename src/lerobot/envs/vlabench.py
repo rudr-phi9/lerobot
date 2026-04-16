@@ -281,6 +281,85 @@ class VLABenchEnv(gym.Env):
         else:
             raise ValueError(f"Unknown obs_type: {self.obs_type}")
 
+    # ---- Action adaptation (EEF → joint ctrl) --------------------------------
+    #
+    # The dataset logs 7D actions [x, y, z, rx, ry, rz, gripper] in end-effector
+    # space, but VLABench's dm_control task writes `data.ctrl[:] = action`
+    # directly — which for Franka expects 9 entries (7 arm joints + 2 gripper
+    # fingers). Reproduce the same EEF-to-joint conversion that VLABench's data
+    # collector uses (`SingleArm.get_qpos_from_ee_pos`, a dm_control IK solver)
+    # so the policy's EEF commands actually drive the robot at eval time.
+
+    _FRANKA_FINGER_OPEN = 0.04  # qpos when gripper fully open
+    _FRANKA_FINGER_CLOSED = 0.0
+
+    @staticmethod
+    def _euler_xyz_to_quat_wxyz(rx: float, ry: float, rz: float) -> np.ndarray:
+        """Euler (XYZ intrinsic) → quaternion (w, x, y, z) — dm_control convention."""
+        cx, cy, cz = np.cos(0.5 * np.array([rx, ry, rz]))
+        sx, sy, sz = np.sin(0.5 * np.array([rx, ry, rz]))
+        return np.array(
+            [
+                cx * cy * cz + sx * sy * sz,
+                sx * cy * cz - cx * sy * sz,
+                cx * sy * cz + sx * cy * sz,
+                cx * cy * sz - sx * sy * cz,
+            ],
+            dtype=np.float64,
+        )
+
+    def _build_ctrl_from_action(self, action: np.ndarray, ctrl_dim: int) -> np.ndarray:
+        """Convert a 7D EEF action into the `ctrl_dim`-sized joint command vector.
+
+        For the Franka default (ctrl_dim=9): 7 arm joint qposes (via IK) +
+        2 gripper finger qposes (open/closed based on the gripper scalar).
+        If the action is already joint-space (shape matches ctrl_dim), pass
+        through.
+        """
+        if action.shape[0] == ctrl_dim:
+            return action.astype(np.float64, copy=False)
+
+        if action.shape[0] != 7:
+            # Unknown layout — fall back to zero-pad so the sim doesn't crash.
+            padded = np.zeros(ctrl_dim, dtype=np.float64)
+            padded[: min(action.shape[0], ctrl_dim)] = action[:ctrl_dim]
+            return padded
+
+        from dm_control.utils.inverse_kinematics import qpos_from_site_pose
+
+        pos = np.asarray(action[:3], dtype=np.float64)
+        rx, ry, rz = float(action[3]), float(action[4]), float(action[5])
+        gripper = float(action[6])
+        quat = self._euler_xyz_to_quat_wxyz(rx, ry, rz)
+
+        assert self._env is not None
+        robot = self._env.task.robot
+        site_name = robot.end_effector_site.full_identifier
+
+        # Important: inplace=False so IK doesn't mutate physics state mid-step;
+        # we only want the solved qpos.
+        ik_result = qpos_from_site_pose(
+            self._physics,
+            site_name=site_name,
+            target_pos=pos,
+            target_quat=quat,
+            inplace=False,
+            max_steps=100,
+        )
+        n_dof = robot.n_dof  # 7 for Franka
+        arm_qpos = ik_result.qpos[:n_dof]
+
+        # Gripper: action scalar in [0, 1] (0=open, 1=closed). Map linearly to
+        # finger qpos in [CLOSED, OPEN]. Franka has 2 mirrored fingers.
+        g = float(np.clip(gripper, 0.0, 1.0))
+        finger_qpos = self._FRANKA_FINGER_OPEN + g * (self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN)
+
+        ctrl = np.zeros(ctrl_dim, dtype=np.float64)
+        ctrl[:n_dof] = arm_qpos
+        # Remaining entries are gripper fingers (usually 2 for Franka).
+        ctrl[n_dof:] = finger_qpos
+        return ctrl
+
     def reset(self, seed=None, **kwargs) -> tuple[RobotObservation, dict[str, Any]]:
         self._ensure_env()
         assert self._env is not None
@@ -295,6 +374,7 @@ class VLABenchEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[RobotObservation, float, bool, bool, dict[str, Any]]:
         self._ensure_env()
         assert self._env is not None
+        assert self._physics is not None
 
         if action.ndim != 1:
             raise ValueError(
@@ -302,24 +382,12 @@ class VLABenchEnv(gym.Env):
                 f"but got shape {action.shape} with ndim={action.ndim}"
             )
 
-        # VLABench's dm_control task does `data.ctrl[:] = action` without adapting
-        # shapes. Franka in VLABench has 9 actuators (7 arm joints + 2 gripper
-        # fingers), but our policy emits a 7D action. Pad with zeros / repeat the
-        # last value so the broadcast succeeds.
-        assert self._physics is not None
-        ctrl_dim = int(self._physics.data.ctrl.shape[0])
-        if action.shape[0] != ctrl_dim:
-            padded = np.zeros(ctrl_dim, dtype=action.dtype)
-            padded[: min(action.shape[0], ctrl_dim)] = action[:ctrl_dim]
-            if action.shape[0] < ctrl_dim:
-                # Repeat the last entry (typically the gripper command) for the
-                # trailing extra actuators.
-                padded[action.shape[0] :] = action[-1]
-            action = padded
-
         if self.action_mode not in ("eef", "joint", "delta_eef"):
             raise ValueError(f"Unknown action_mode: {self.action_mode}")
-        timestep = self._env.step(action)
+
+        ctrl_dim = int(self._physics.data.ctrl.shape[0])
+        ctrl = self._build_ctrl_from_action(action, ctrl_dim)
+        timestep = self._env.step(ctrl)
 
         # Extract reward from dm_control timestep
         reward = float(timestep.reward) if timestep.reward is not None else 0.0
