@@ -23,6 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 from huggingface_hub.errors import HfHubHTTPError
 
@@ -372,6 +373,45 @@ def test_step_timing_collector_accepts_metric_like_values(tmp_path):
     payload = json.loads((tmp_path / "step_timing_summary.json").read_text())
     assert payload["total_update_s"]["mean"] == 0.6
     assert payload["dataloading_s"]["mean"] == 0.05
+
+
+def test_step_timing_collector_records_forward_backward_optimizer(tmp_path):
+    from lerobot.utils.profiling_utils import _StepTimingCollector
+
+    collector = _StepTimingCollector()
+    for _ in range(3):
+        collector.record_section("forward", 0.10)
+        collector.record_section("backward", 0.20)
+        collector.record_section("optimizer", 0.05)
+    collector.write_json(tmp_path / "step_timing_summary.json")
+
+    payload = json.loads((tmp_path / "step_timing_summary.json").read_text())
+    assert payload["forward_s"]["mean"] == pytest.approx(0.10)
+    assert payload["backward_s"]["mean"] == pytest.approx(0.20)
+    assert payload["optimizer_s"]["mean"] == pytest.approx(0.05)
+    assert payload["forward_s"]["count"] == 3
+
+
+def test_training_profiler_section_records_duration(tmp_path):
+    from lerobot.utils.profiling_utils import TrainingProfiler
+
+    profiler = TrainingProfiler(
+        mode="summary",
+        output_dir=tmp_path,
+        device=torch.device("cpu"),
+    )
+    with profiler:
+        with profiler.section("forward"):
+            pass
+        with profiler.section("backward"):
+            pass
+        profiler.step(1, argparse.Namespace(update_s=0.5, dataloading_s=0.01))
+    profiler.finalize()
+
+    payload = json.loads((tmp_path / "step_timing_summary.json").read_text())
+    assert payload["forward_s"]["count"] == 1
+    assert payload["backward_s"]["count"] == 1
+    assert payload["forward_s"]["mean"] >= 0.0
 
 
 def test_profiler_device_time_uses_generic_attr_first():

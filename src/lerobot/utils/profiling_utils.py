@@ -20,6 +20,9 @@ import hashlib
 import json
 import logging
 import statistics
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from numbers import Real
 from pathlib import Path
@@ -245,6 +248,7 @@ def _as_float(value: Any) -> float:
 class _StepTimingCollector:
     total_update_s: list[float] = field(default_factory=list)
     dataloading_s: list[float] = field(default_factory=list)
+    section_s: dict[str, list[float]] = field(default_factory=dict)
     memory_timeline: list[dict[str, float | int]] = field(default_factory=list)
 
     def record_step(self, total_update_s: float) -> None:
@@ -252,6 +256,9 @@ class _StepTimingCollector:
 
     def record_dataloading(self, dataloading_s: float) -> None:
         self.dataloading_s.append(_as_float(dataloading_s))
+
+    def record_section(self, name: str, duration_s: float) -> None:
+        self.section_s.setdefault(name, []).append(_as_float(duration_s))
 
     def record_memory(self, *, step: int, allocated_bytes: int, reserved_bytes: int) -> None:
         self.memory_timeline.append(
@@ -263,11 +270,14 @@ class _StepTimingCollector:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "total_update_s": _summary(self.total_update_s),
             "dataloading_s": _summary(self.dataloading_s),
             "memory_timeline": self.memory_timeline,
         }
+        for name, values in self.section_s.items():
+            payload[f"{name}_s"] = _summary(values)
+        return payload
 
     def write_json(self, output_path: Path, extra: dict[str, Any] | None = None) -> None:
         payload = self.to_dict()
@@ -354,6 +364,23 @@ class TrainingProfiler:
 
     def __exit__(self, *exc: Any) -> bool:
         return self._torch_profiler.__exit__(*exc)
+
+    @contextmanager
+    def section(self, name: str) -> Iterator[None]:
+        """Time a region of the training step (e.g. forward/backward/optimizer).
+
+        On CUDA we synchronize before and after so the reported duration
+        reflects GPU work, not just the CPU-side kernel-launch latency.
+        """
+        if self._device.type == "cuda":
+            torch.cuda.synchronize(self._device)
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            if self._device.type == "cuda":
+                torch.cuda.synchronize(self._device)
+            self._timing.record_section(name, time.perf_counter() - start)
 
     def step(self, step_num: int, train_tracker: Any) -> None:
         self._timing.record_step(_as_float(train_tracker.update_s))
