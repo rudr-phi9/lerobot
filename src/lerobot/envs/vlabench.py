@@ -189,6 +189,8 @@ class VLABenchEnv(gym.Env):
         if self._env is not None:
             return
 
+        import VLABench.robots  # noqa: F401  # type: ignore[import-untyped]
+        import VLABench.tasks  # noqa: F401  # type: ignore[import-untyped]
         from VLABench.envs import load_env  # type: ignore[import-untyped]
 
         h, w = self.render_resolution
