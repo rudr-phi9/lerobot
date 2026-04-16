@@ -103,6 +103,7 @@ jobs:
             -e HOME=/tmp/lerobot-home \
             -e HF_HOME=/tmp/hf \
             -e HF_LEROBOT_HOME=/tmp/hf-lerobot \
+            -e TORCH_HOME=/tmp/torch-home \
             -e TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor-cache \
             -e UV_PROJECT_ENVIRONMENT=/tmp/lerobot-venv \
             -e UV_CACHE_DIR=/tmp/uv-cache \
@@ -121,7 +122,7 @@ jobs:
             huggingface/lerobot-gpu:latest \
             bash -c '
               set -euxo pipefail
-              mkdir -p "${HOME}" "${HF_HOME}" "${HF_LEROBOT_HOME}" "${UV_CACHE_DIR}" "${XDG_CACHE_HOME}" "${XDG_DATA_HOME}" "${TORCHINDUCTOR_CACHE_DIR}"
+              mkdir -p "${HOME}" "${HF_HOME}" "${HF_LEROBOT_HOME}" "${TORCH_HOME}" "${UV_CACHE_DIR}" "${XDG_CACHE_HOME}" "${XDG_DATA_HOME}" "${TORCHINDUCTOR_CACHE_DIR}"
               rm -rf /tmp/lerobot-src
               cp -a /workspace/. /tmp/lerobot-src
               cd /tmp/lerobot-src
