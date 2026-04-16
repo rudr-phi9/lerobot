@@ -62,7 +62,7 @@ _RTC_JOIN_TIMEOUT_S: float = 3.0
 
 
 # ---------------------------------------------------------------------------
-# RTC helpers (extracted from examples/rtc and examples/hil)
+# RTC helpers
 # ---------------------------------------------------------------------------
 
 
@@ -185,6 +185,7 @@ class RTCInferenceEngine(InferenceEngine):
 
     @property
     def ready(self) -> bool:
+        """True once torch.compile warmup is complete (or immediately if compile is disabled)."""
         return self._compile_warmup_done.is_set()
 
     @property
@@ -194,6 +195,7 @@ class RTCInferenceEngine(InferenceEngine):
 
     @property
     def action_queue(self) -> ActionQueue | None:
+        """The shared action queue between the RTC thread and the main loop."""
         return self._action_queue
 
     def start(self) -> None:
@@ -221,12 +223,15 @@ class RTCInferenceEngine(InferenceEngine):
             self._rtc_thread = None
 
     def pause(self) -> None:
+        """Pause the RTC background thread."""
         self._policy_active.clear()
 
     def resume(self) -> None:
+        """Resume the RTC background thread."""
         self._policy_active.set()
 
     def reset(self) -> None:
+        """Reset the policy, processors, and action queue."""
         self._policy.reset()
         self._preprocessor.reset()
         self._postprocessor.reset()

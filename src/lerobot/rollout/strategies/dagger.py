@@ -105,6 +105,7 @@ class DAggerEvents:
 
     @property
     def phase(self) -> DAggerPhase:
+        """Current phase of the DAgger state machine."""
         with self._lock:
             return self._phase
 
@@ -343,6 +344,7 @@ class DAggerStrategy(RolloutStrategy):
         self._events = DAggerEvents()
 
     def setup(self, ctx: RolloutContext) -> None:
+        """Initialise the inference engine, keyboard listener, and pedal handler."""
         self._init_engine(ctx)
 
         self._listener = _init_dagger_keyboard(self._events)
@@ -357,6 +359,7 @@ class DAggerStrategy(RolloutStrategy):
         logger.info("Controls: SPACE=pause, c=take control, p=resume, ->=end, <-=redo, ESC=stop")
 
     def run(self, ctx: RolloutContext) -> None:
+        """Run DAgger episodes with human-in-the-loop intervention."""
         dataset = ctx.data.dataset
         events = self._events
         teleop = ctx.hardware.teleop
@@ -394,6 +397,7 @@ class DAggerStrategy(RolloutStrategy):
                     dataset.save_episode()
 
     def teardown(self, ctx: RolloutContext) -> None:
+        """Stop listeners, finalise the dataset, and disconnect hardware."""
         log_say("Stop recording", self.config.play_sounds, blocking=True)
 
         if self._listener is not None and not is_headless():

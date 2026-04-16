@@ -35,10 +35,12 @@ class BaseStrategy(RolloutStrategy):
     """
 
     def setup(self, ctx: RolloutContext) -> None:
+        """Initialise the inference engine."""
         self._init_engine(ctx)
         logger.info("Base strategy ready")
 
     def run(self, ctx: RolloutContext) -> None:
+        """Run the autonomous control loop until shutdown or duration expires."""
         engine = self._engine
         cfg = ctx.runtime.cfg
         robot = ctx.hardware.robot_wrapper
@@ -69,5 +71,6 @@ class BaseStrategy(RolloutStrategy):
                 precise_sleep(sleep_t)
 
     def teardown(self, ctx: RolloutContext) -> None:
+        """Disconnect hardware and stop inference."""
         self._teardown_hardware(ctx.hardware)
         logger.info("Base strategy teardown complete")

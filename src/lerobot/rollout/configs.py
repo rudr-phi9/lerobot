@@ -199,7 +199,7 @@ class RolloutConfig:
             logger.warning("DAgger with record_autonomous=True forces streaming_encoding=True")
             self.dataset.streaming_encoding = True
 
-        # --- Policy loading (same pattern as existing scripts) ---
+        # --- Policy loading ---
         if self.robot is None:
             raise ValueError("--robot.type is required for rollout")
 

@@ -59,6 +59,7 @@ class SentryStrategy(RolloutStrategy):
         self._episode_lock = Lock()
 
     def setup(self, ctx: RolloutContext) -> None:
+        """Initialise the inference engine and background push executor."""
         self._init_engine(ctx)
         self._push_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sentry-push")
         logger.info(
@@ -68,6 +69,7 @@ class SentryStrategy(RolloutStrategy):
         )
 
     def run(self, ctx: RolloutContext) -> None:
+        """Run the continuous recording loop with automatic episode rotation."""
         engine = self._engine
         cfg = ctx.runtime.cfg
         robot = ctx.hardware.robot_wrapper
@@ -140,6 +142,7 @@ class SentryStrategy(RolloutStrategy):
                     self._needs_push.set()
 
     def teardown(self, ctx: RolloutContext) -> None:
+        """Flush pending pushes, finalise the dataset, and disconnect hardware."""
         # Flush any queued/running push cleanly.
         if self._push_executor is not None:
             self._push_executor.shutdown(wait=True)

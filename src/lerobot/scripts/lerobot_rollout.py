@@ -120,6 +120,7 @@ def rollout(cfg: RolloutConfig):
 
 
 def main():
+    """CLI entry point for ``lerobot-rollout``."""
     register_third_party_plugins()
     rollout()
 

@@ -86,6 +86,7 @@ class RolloutRingBuffer:
 
     @property
     def estimated_bytes(self) -> int:
+        """Estimated total byte size of all buffered frames."""
         return self._current_bytes
 
 

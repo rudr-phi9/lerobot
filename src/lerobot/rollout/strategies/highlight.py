@@ -81,6 +81,7 @@ class HighlightStrategy(RolloutStrategy):
         self._pending_push: Future | None = None
 
     def setup(self, ctx: RolloutContext) -> None:
+        """Initialise the inference engine, ring buffer, and keyboard listener."""
         self._init_engine(ctx)
 
         self._ring = RolloutRingBuffer(
@@ -99,6 +100,7 @@ class HighlightStrategy(RolloutStrategy):
         )
 
     def run(self, ctx: RolloutContext) -> None:
+        """Run the autonomous loop, buffering frames and recording on demand."""
         engine = self._engine
         cfg = ctx.runtime.cfg
         robot = ctx.hardware.robot_wrapper
@@ -179,6 +181,7 @@ class HighlightStrategy(RolloutStrategy):
                         dataset.save_episode()
 
     def teardown(self, ctx: RolloutContext) -> None:
+        """Stop listeners, finalise the dataset, and disconnect hardware."""
         if self._listener is not None:
             self._listener.stop()
 

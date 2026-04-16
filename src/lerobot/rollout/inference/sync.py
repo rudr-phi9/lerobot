@@ -66,11 +66,13 @@ class SyncInferenceEngine(InferenceEngine):
         """No background resources to stop."""
 
     def reset(self) -> None:
+        """Reset the policy and pre/post-processors."""
         self._policy.reset()
         self._preprocessor.reset()
         self._postprocessor.reset()
 
     def get_action(self, obs_frame: dict | None) -> torch.Tensor | None:
+        """Run the full inference pipeline on ``obs_frame`` and return an action tensor."""
         if obs_frame is None:
             return None
         # Shallow copy is intentional: the caller (`send_next_action`) builds
