@@ -40,7 +40,7 @@ p.write_text(t.replace( \
     'if not os.path.isdir(xml_dir): return []\n    subdirs = os.listdir(xml_dir)'))" && \
     uv pip install --no-cache -e ~/VLABench -e ~/rrt-algorithms \
       mujoco==3.2.2 dm-control==1.0.22 \
-      open3d colorlog scikit-learn
+      open3d colorlog scikit-learn openai
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
