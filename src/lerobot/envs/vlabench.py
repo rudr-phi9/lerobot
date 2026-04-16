@@ -248,8 +248,14 @@ class VLABenchEnv(gym.Env):
 
                 images[key] = cv2.resize(images[key], (w, h), interpolation=cv2.INTER_AREA).astype(np.uint8)
 
-        # Extract end-effector state
+        # Extract end-effector state — coerce to exactly (7,) so vector env concat
+        # doesn't fail with shape-mismatch on buffer np.stack.
         ee_state = obs.get("ee_state", np.zeros(7, dtype=np.float64))
+        ee_state = np.asarray(ee_state, dtype=np.float64).ravel()
+        if ee_state.shape[0] != 7:
+            fixed = np.zeros(7, dtype=np.float64)
+            fixed[: min(7, ee_state.shape[0])] = ee_state[:7]
+            ee_state = fixed
 
         if self.obs_type == "pixels":
             return {"pixels": images}

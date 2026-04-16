@@ -50,4 +50,8 @@ RUN python ~/VLABench/scripts/download_assets.py --choice all
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
 
+# Re-install lerobot editably so the new source (with VLABenchEnv registration
+# and updated obs handling) replaces the stale package baked into the nightly image.
+RUN uv pip install --no-cache --no-deps -e .
+
 CMD ["/bin/bash"]
