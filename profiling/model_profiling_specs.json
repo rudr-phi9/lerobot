@@ -152,7 +152,17 @@
       "--policy.prediction_mode=diffusion",
       "--policy.attn_implementation=eager",
       "--policy.device=cuda",
-      "--batch_size=1"
+      "--batch_size=1",
+      "--use_policy_training_preset=false",
+      "--optimizer.type=sgd",
+      "--optimizer.lr=1e-5",
+      "--optimizer.weight_decay=0",
+      "--optimizer.grad_clip_norm=1.0",
+      "--scheduler.type=cosine_decay_with_warmup",
+      "--scheduler.peak_lr=1e-5",
+      "--scheduler.decay_lr=1e-6",
+      "--scheduler.num_warmup_steps=0",
+      "--scheduler.num_decay_steps=12"
     ]
   },
   "xvla": {
@@ -165,7 +175,7 @@
       "--policy.empty_cameras=1",
       "--policy.device=cuda",
       "--batch_size=1",
-      "--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.image2\": \"observation.images.camera2\"}"
+      "--rename_map={\"observation.images.front\": \"observation.images.image\", \"observation.images.wrist\": \"observation.images.image2\"}"
     ]
   }
 }
