@@ -20,9 +20,10 @@
 
 FROM huggingface/lerobot-gpu:latest
 
-# Install VLABench and download simulation assets.
-RUN pip install --no-cache-dir vlabench mujoco==3.2.2 dm-control==1.0.22 && \
-    python -c "from VLABench.utils import download_assets; download_assets()" 2>/dev/null || true
+# Install VLABench and pin MuJoCo/dm-control versions.
+# The base image uses uv, not pip.
+RUN uv pip install --no-cache vlabench mujoco==3.2.2 dm-control==1.0.22 && \
+    python -c "from VLABench.utils import download_assets; download_assets()"
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
