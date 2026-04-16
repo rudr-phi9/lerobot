@@ -45,7 +45,6 @@ class BaseStrategy(RolloutStrategy):
         interpolator = self._interpolator
 
         control_interval = interpolator.get_control_interval(cfg.fps)
-        ordered_keys = ctx.data.ordered_action_keys
 
         start_time = time.perf_counter()
         engine.resume()
@@ -63,14 +62,12 @@ class BaseStrategy(RolloutStrategy):
             if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                 continue
 
-            send_next_action(
-                engine, obs_processed, obs, ctx, interpolator, ordered_keys, ctx.data.dataset_features
-            )
+            send_next_action(obs_processed, obs, ctx, interpolator)
 
             dt = time.perf_counter() - loop_start
             if (sleep_t := control_interval - dt) > 0:
                 precise_sleep(sleep_t)
 
     def teardown(self, ctx: RolloutContext) -> None:
-        self._teardown_hardware(ctx)
+        self._teardown_hardware(ctx.hardware)
         logger.info("Base strategy teardown complete")

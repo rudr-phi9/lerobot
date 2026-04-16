@@ -73,10 +73,9 @@ class SentryStrategy(RolloutStrategy):
         robot = ctx.hardware.robot_wrapper
         dataset = ctx.data.dataset
         interpolator = self._interpolator
+        features = ctx.data.dataset_features
 
         control_interval = interpolator.get_control_interval(cfg.fps)
-        ordered_keys = ctx.data.ordered_action_keys
-        features = dataset.features
 
         engine.resume()
 
@@ -100,9 +99,7 @@ class SentryStrategy(RolloutStrategy):
                     if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                         continue
 
-                    action_dict = send_next_action(
-                        engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
-                    )
+                    action_dict = send_next_action(obs_processed, obs, ctx, interpolator)
 
                     if action_dict is not None:
                         obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
@@ -156,7 +153,7 @@ class SentryStrategy(RolloutStrategy):
                     private=ctx.runtime.cfg.dataset.private,
                 )
 
-        self._teardown_hardware(ctx)
+        self._teardown_hardware(ctx.hardware)
         logger.info("Sentry strategy teardown complete")
 
     def _background_push(self, dataset, cfg) -> None:

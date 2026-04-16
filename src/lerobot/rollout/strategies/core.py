@@ -20,16 +20,16 @@ import abc
 import time
 from typing import TYPE_CHECKING
 
-from lerobot.policies.rtc import ActionInterpolator
+from lerobot.utils.action_interpolator import ActionInterpolator
 from lerobot.utils.constants import OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.robot_utils import precise_sleep
 
-from ..inference import InferenceStrategy
+from ..inference import InferenceEngine
 
 if TYPE_CHECKING:
     from ..configs import RolloutStrategyConfig
-    from ..context import RolloutContext
+    from ..context import HardwareContext, RolloutContext
 
 
 class RolloutStrategy(abc.ABC):
@@ -42,12 +42,12 @@ class RolloutStrategy(abc.ABC):
 
     def __init__(self, config: RolloutStrategyConfig) -> None:
         self.config = config
-        self._engine: InferenceStrategy | None = None
+        self._engine: InferenceEngine | None = None
         self._interpolator: ActionInterpolator | None = None
         self._warmup_flushed: bool = False
 
     def _init_engine(self, ctx: RolloutContext) -> None:
-        """Attach the inference strategy + interpolator and start the backend.
+        """Attach the inference engine + interpolator and start the backend.
 
         Call this from ``setup()`` so strategies share identical setup
         without duplicating code.
@@ -80,14 +80,14 @@ class RolloutStrategy(abc.ABC):
             engine.resume()
         return False
 
-    def _teardown_hardware(self, ctx: RolloutContext) -> None:
+    def _teardown_hardware(self, hw: HardwareContext) -> None:
         """Stop the inference engine and disconnect hardware."""
         if self._engine is not None:
             self._engine.stop()
-        robot = ctx.hardware.robot_wrapper.inner
+        robot = hw.robot_wrapper.inner
         if robot.is_connected:
             robot.disconnect()
-        teleop = ctx.hardware.teleop
+        teleop = hw.teleop
         if teleop is not None and teleop.is_connected:
             teleop.disconnect()
 
@@ -110,24 +110,25 @@ class RolloutStrategy(abc.ABC):
 
 
 def send_next_action(
-    engine: InferenceStrategy,
     obs_processed: dict,
     obs_raw: dict,
     ctx: RolloutContext,
     interpolator: ActionInterpolator,
-    ordered_keys: list[str],
-    features: dict,
 ) -> dict | None:
     """Dispatch the next action to the robot.
 
-    Pulls the next action tensor from the inference strategy, feeds the
+    Pulls the next action tensor from the inference engine, feeds the
     interpolator, and sends the interpolated action through the
     ``robot_action_processor`` to the robot.  Works identically for
-    sync and async backends — the strategy never needs to branch.
+    sync and async backends — the rollout strategy never needs to branch.
 
     Returns the action dict that was sent, or ``None`` if no action was
     ready (e.g. empty async queue, interpolator not yet primed).
     """
+    engine = ctx.policy.inference
+    features = ctx.data.dataset_features
+    ordered_keys = ctx.data.ordered_action_keys
+
     if interpolator.needs_new_action():
         obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
         action_tensor = engine.get_action(obs_frame)

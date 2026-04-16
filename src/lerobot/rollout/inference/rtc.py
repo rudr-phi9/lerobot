@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Real-Time Chunking inference strategy.
+"""Real-Time Chunking inference engine.
 
 A background thread produces action chunks asynchronously via
 :meth:`policy.predict_action_chunk`.  The main control loop polls
@@ -47,7 +47,7 @@ from lerobot.utils.constants import OBS_STATE
 from lerobot.utils.feature_utils import build_dataset_frame
 
 from ..robot_wrapper import ThreadSafeRobot
-from .base import InferenceStrategy
+from .base import InferenceEngine
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +104,11 @@ def _normalize_prev_actions_length(prev_actions: torch.Tensor, target_steps: int
 
 
 # ---------------------------------------------------------------------------
-# RTCInferenceStrategy
+# RTCInferenceEngine
 # ---------------------------------------------------------------------------
 
 
-class RTCInferenceStrategy(InferenceStrategy):
+class RTCInferenceEngine(InferenceEngine):
     """Async RTC inference: a background thread produces action chunks.
 
     ``get_action`` pops the next action from the shared queue (or

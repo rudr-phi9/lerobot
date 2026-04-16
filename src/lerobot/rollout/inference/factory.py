@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Inference strategy configs and factory.
+"""Inference engine configs and factory.
 
 Selection is explicit via ``--inference.type=sync|rtc``.  Adding a new
 backend requires registering its config subclass and dispatching it in
-:func:`create_inference_strategy`.
+:func:`create_inference_engine`.
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ from lerobot.policies.rtc.configuration_rtc import RTCConfig
 from lerobot.processor import PolicyProcessorPipeline
 
 from ..robot_wrapper import ThreadSafeRobot
-from .base import InferenceStrategy
-from .rtc import RTCInferenceStrategy
-from .sync import SyncInferenceStrategy
+from .base import InferenceEngine
+from .rtc import RTCInferenceEngine
+from .sync import SyncInferenceEngine
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InferenceStrategyConfig(draccus.ChoiceRegistry, abc.ABC):
+class InferenceEngineConfig(draccus.ChoiceRegistry, abc.ABC):
     """Abstract base for inference backend configuration.
 
     Use ``--inference.type=<name>`` on the CLI to select a backend.
@@ -57,15 +57,15 @@ class InferenceStrategyConfig(draccus.ChoiceRegistry, abc.ABC):
         return self.get_choice_name(self.__class__)
 
 
-@InferenceStrategyConfig.register_subclass("sync")
+@InferenceEngineConfig.register_subclass("sync")
 @dataclass
-class SyncInferenceConfig(InferenceStrategyConfig):
+class SyncInferenceConfig(InferenceEngineConfig):
     """Inline synchronous inference (one policy call per control tick)."""
 
 
-@InferenceStrategyConfig.register_subclass("rtc")
+@InferenceEngineConfig.register_subclass("rtc")
 @dataclass
-class RTCInferenceConfig(InferenceStrategyConfig):
+class RTCInferenceConfig(InferenceEngineConfig):
     """Real-Time Chunking: async policy inference in a background thread."""
 
     # ``RTCConfig`` is a small dataclass with default-only fields, so eagerly
@@ -80,8 +80,8 @@ class RTCInferenceConfig(InferenceStrategyConfig):
 # ---------------------------------------------------------------------------
 
 
-def create_inference_strategy(
-    config: InferenceStrategyConfig,
+def create_inference_engine(
+    config: InferenceEngineConfig,
     *,
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline,
@@ -96,10 +96,10 @@ def create_inference_strategy(
     use_torch_compile: bool = False,
     compile_warmup_inferences: int = 2,
     shutdown_event: Event | None = None,
-) -> InferenceStrategy:
-    """Instantiate the appropriate inference strategy from a config object."""
+) -> InferenceEngine:
+    """Instantiate the appropriate inference engine from a config object."""
     if isinstance(config, SyncInferenceConfig):
-        return SyncInferenceStrategy(
+        return SyncInferenceEngine(
             policy=policy,
             preprocessor=preprocessor,
             postprocessor=postprocessor,
@@ -110,7 +110,7 @@ def create_inference_strategy(
             robot_type=robot_wrapper.robot_type,
         )
     if isinstance(config, RTCInferenceConfig):
-        return RTCInferenceStrategy(
+        return RTCInferenceEngine(
             policy=policy,
             preprocessor=preprocessor,
             postprocessor=postprocessor,
@@ -125,4 +125,4 @@ def create_inference_strategy(
             rtc_queue_threshold=config.queue_threshold,
             shutdown_event=shutdown_event,
         )
-    raise ValueError(f"Unknown inference strategy type: {type(config).__name__}")
+    raise ValueError(f"Unknown inference engine type: {type(config).__name__}")

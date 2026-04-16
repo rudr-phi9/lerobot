@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Event as ThreadingEvent
 
 from lerobot.common.control_utils import is_headless
@@ -75,7 +76,9 @@ class HighlightStrategy(RolloutStrategy):
         self._listener = None
         self._save_requested = ThreadingEvent()
         self._recording_live = ThreadingEvent()
-        self._shutdown_event: ThreadingEvent | None = None
+        self._push_requested = ThreadingEvent()
+        self._push_executor: ThreadPoolExecutor | None = None
+        self._pending_push: Future | None = None
 
     def setup(self, ctx: RolloutContext) -> None:
         self._init_engine(ctx)
@@ -86,12 +89,13 @@ class HighlightStrategy(RolloutStrategy):
             fps=ctx.runtime.cfg.fps,
         )
 
-        self._shutdown_event = ctx.runtime.shutdown_event
-        self._setup_keyboard()
+        self._push_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="highlight-push")
+        self._setup_keyboard(ctx.runtime.shutdown_event)
         logger.info(
-            "Highlight strategy ready (buffer=%.0fs, key='%s')",
+            "Highlight strategy ready (buffer=%.0fs, save='%s', push='%s')",
             self.config.ring_buffer_seconds,
             self.config.save_key,
+            self.config.push_key,
         )
 
     def run(self, ctx: RolloutContext) -> None:
@@ -101,10 +105,9 @@ class HighlightStrategy(RolloutStrategy):
         dataset = ctx.data.dataset
         ring = self._ring
         interpolator = self._interpolator
+        features = ctx.data.dataset_features
 
         control_interval = interpolator.get_control_interval(cfg.fps)
-        ordered_keys = ctx.data.ordered_action_keys
-        features = dataset.features
 
         engine.resume()
 
@@ -126,9 +129,7 @@ class HighlightStrategy(RolloutStrategy):
                     if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
                         continue
 
-                    action_dict = send_next_action(
-                        engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
-                    )
+                    action_dict = send_next_action(obs_processed, obs, ctx, interpolator)
 
                     if action_dict is not None:
                         obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
@@ -158,9 +159,10 @@ class HighlightStrategy(RolloutStrategy):
                                 dataset.save_episode()
                                 logger.info("Episode saved")
                                 self._recording_live.clear()
-                                engine.reset()
-                                interpolator.reset()
-                                engine.resume()
+
+                        if self._push_requested.is_set():
+                            self._push_requested.clear()
+                            self._background_push(dataset, cfg)
 
                         if self._recording_live.is_set():
                             dataset.add_frame(frame)
@@ -180,6 +182,10 @@ class HighlightStrategy(RolloutStrategy):
         if self._listener is not None:
             self._listener.stop()
 
+        if self._push_executor is not None:
+            self._push_executor.shutdown(wait=True)
+            self._push_executor = None
+
         if ctx.data.dataset is not None:
             ctx.data.dataset.finalize()
             if ctx.runtime.cfg.dataset and ctx.runtime.cfg.dataset.push_to_hub:
@@ -188,28 +194,50 @@ class HighlightStrategy(RolloutStrategy):
                     private=ctx.runtime.cfg.dataset.private,
                 )
 
-        self._teardown_hardware(ctx)
+        self._teardown_hardware(ctx.hardware)
         logger.info("Highlight strategy teardown complete")
 
-    def _setup_keyboard(self) -> None:
-        """Set up keyboard listener for the save key."""
+    def _setup_keyboard(self, shutdown_event: ThreadingEvent) -> None:
+        """Set up keyboard listener for save and push keys."""
         if is_headless():
-            logger.warning("Headless environment — highlight save key unavailable")
+            logger.warning("Headless environment — highlight keys unavailable")
             return
 
         try:
             save_key = self.config.save_key
+            push_key = self.config.push_key
 
             def on_press(key):
                 with contextlib.suppress(Exception):
                     if hasattr(key, "char") and key.char == save_key:
                         self._save_requested.set()
+                    elif hasattr(key, "char") and key.char == push_key:
+                        self._push_requested.set()
                     elif key == keyboard.Key.esc:
                         self._save_requested.clear()
-                        if self._shutdown_event is not None:
-                            self._shutdown_event.set()
+                        shutdown_event.set()
 
             self._listener = keyboard.Listener(on_press=on_press)
             self._listener.start()
         except ImportError:
             logger.warning("pynput not available — keyboard listener disabled")
+
+    def _background_push(self, dataset, cfg) -> None:
+        """Queue a Hub push on the single-worker executor."""
+        if self._push_executor is None:
+            return
+
+        if self._pending_push is not None and not self._pending_push.done():
+            logger.info("Previous push still in progress; queueing next")
+
+        def _push():
+            try:
+                dataset.push_to_hub(
+                    tags=cfg.dataset.tags if cfg.dataset else None,
+                    private=cfg.dataset.private if cfg.dataset else False,
+                )
+                logger.info("Background push to hub complete")
+            except Exception as e:
+                logger.error("Background push failed: %s", e)
+
+        self._pending_push = self._push_executor.submit(_push)

@@ -19,15 +19,15 @@ from __future__ import annotations
 import abc
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import draccus
 
 from lerobot.configs import PreTrainedConfig, parser
+from lerobot.configs.dataset import DatasetRecordConfig
 from lerobot.robots.config import RobotConfig
 from lerobot.teleoperators.config import TeleoperatorConfig
 
-from .inference import InferenceStrategyConfig, SyncInferenceConfig
+from .inference import InferenceEngineConfig, SyncInferenceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ class HighlightStrategyConfig(RolloutStrategyConfig):
     ring_buffer_seconds: float = 30.0
     ring_buffer_max_memory_mb: float = 2048.0
     save_key: str = "s"
+    push_key: str = "h"
 
 
 @RolloutStrategyConfig.register_subclass("dagger")
@@ -107,33 +108,6 @@ class DAggerStrategyConfig(RolloutStrategyConfig):
     log_hz: bool = True
     hz_log_interval_s: float = 2.0
     record_autonomous: bool = True
-
-
-# ---------------------------------------------------------------------------
-# Dataset recording config (shared across recording strategies)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RolloutDatasetConfig:
-    """Dataset configuration for rollout strategies that record data."""
-
-    repo_id: str = ""
-    single_task: str = ""
-    root: str | Path | None = None
-    fps: int = 30
-    video: bool = True
-    push_to_hub: bool = True
-    private: bool = False
-    tags: list[str] | None = None
-    num_image_writer_processes: int = 0
-    num_image_writer_threads_per_camera: int = 4
-    video_encoding_batch_size: int = 1
-    vcodec: str = "auto"
-    streaming_encoding: bool = True
-    encoder_queue_maxsize: int = 30
-    encoder_threads: int | None = None
-    rename_map: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +135,10 @@ class RolloutConfig:
     strategy: RolloutStrategyConfig = field(default_factory=BaseStrategyConfig)
 
     # Inference backend (polymorphic: --inference.type=sync|rtc)
-    inference: InferenceStrategyConfig = field(default_factory=SyncInferenceConfig)
+    inference: InferenceEngineConfig = field(default_factory=SyncInferenceConfig)
 
     # Dataset (required for sentry, highlight, dagger; None for base)
-    dataset: RolloutDatasetConfig | None = None
+    dataset: DatasetRecordConfig | None = None
 
     # Runtime
     fps: float = 30.0

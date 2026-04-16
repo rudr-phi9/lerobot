@@ -49,9 +49,9 @@ from lerobot.utils.feature_utils import combine_feature_dicts, hw_to_dataset_fea
 
 from .configs import BaseStrategyConfig, DAggerStrategyConfig, RolloutConfig
 from .inference import (
-    InferenceStrategy,
+    InferenceEngine,
     RTCInferenceConfig,
-    create_inference_strategy,
+    create_inference_engine,
 )
 from .robot_wrapper import ThreadSafeRobot
 
@@ -106,12 +106,12 @@ class HardwareContext:
 
 @dataclass
 class PolicyContext:
-    """Loaded policy and its inference strategy."""
+    """Loaded policy and its inference engine."""
 
     policy: PreTrainedPolicy
     preprocessor: PolicyProcessorPipeline
     postprocessor: PolicyProcessorPipeline
-    inference: InferenceStrategy
+    inference: InferenceEngine
 
 
 @dataclass
@@ -159,7 +159,7 @@ def build_rollout_context(
     robot_action_processor: RobotProcessorPipeline | None = None,
     robot_observation_processor: RobotProcessorPipeline | None = None,
 ) -> RolloutContext:
-    """Wire up policy, processors, hardware, dataset, and inference strategy.
+    """Wire up policy, processors, hardware, dataset, and inference engine.
 
     The order is policy-first / hardware-last so a bad ``--policy.path``
     fails fast without touching the robot.
@@ -329,7 +329,7 @@ def build_rollout_context(
 
     # --- 7. Inference strategy (needs policy + pre/post + hardware) --
     task_str = cfg.dataset.single_task if cfg.dataset else cfg.task
-    inference_strategy = create_inference_strategy(
+    inference_strategy = create_inference_engine(
         cfg.inference,
         policy=policy,
         preprocessor=preprocessor,

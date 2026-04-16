@@ -12,28 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Inference strategy package — backend-agnostic action production.
+"""Inference engine package — backend-agnostic action production.
 
 Concrete strategies (sync, RTC, …) expose the same small interface so
 rollout strategies never branch on the inference backend.
 """
 
-from .base import InferenceStrategy
+from .base import InferenceEngine
 from .factory import (
-    InferenceStrategyConfig,
+    InferenceEngineConfig,
     RTCInferenceConfig,
     SyncInferenceConfig,
-    create_inference_strategy,
+    create_inference_engine,
 )
-from .rtc import RTCInferenceStrategy
-from .sync import SyncInferenceStrategy
+from .rtc import RTCInferenceEngine
+from .sync import SyncInferenceEngine
 
 __all__ = [
-    "InferenceStrategy",
-    "InferenceStrategyConfig",
+    "InferenceEngine",
+    "InferenceEngineConfig",
     "RTCInferenceConfig",
-    "RTCInferenceStrategy",
+    "RTCInferenceEngine",
     "SyncInferenceConfig",
-    "SyncInferenceStrategy",
-    "create_inference_strategy",
+    "SyncInferenceEngine",
+    "create_inference_engine",
 ]

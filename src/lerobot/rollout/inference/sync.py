@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Synchronous inference strategy: inline policy call per control tick."""
+"""Synchronous inference engine: inline policy call per control tick."""
 
 from __future__ import annotations
 
@@ -26,12 +26,12 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
 from lerobot.processor import PolicyProcessorPipeline
 
-from .base import InferenceStrategy
+from .base import InferenceEngine
 
 logger = logging.getLogger(__name__)
 
 
-class SyncInferenceStrategy(InferenceStrategy):
+class SyncInferenceEngine(InferenceEngine):
     """Inline synchronous inference: compute one action per call.
 
     ``get_action`` runs the full policy pipeline (pre/post-processor +

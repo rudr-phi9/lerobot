@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Inference strategy ABC.
+"""Inference engine ABC.
 
 Rollout strategies consume actions through this small interface so they
-do not need to know whether inference is synchronous, runs in a
-background thread (RTC), or comes from an external source.
+do not need to know whether the inference engine is synchronous, runs in
+a background thread (RTC), or comes from an external source.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import abc
 import torch
 
 
-class InferenceStrategy(abc.ABC):
+class InferenceEngine(abc.ABC):
     """Abstract backend for producing actions during rollout.
 
     Subclasses decide whether inference happens inline, in a background

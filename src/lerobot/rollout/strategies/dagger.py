@@ -407,7 +407,7 @@ class DAggerStrategy(RolloutStrategy):
                     private=ctx.runtime.cfg.dataset.private,
                 )
 
-        self._teardown_hardware(ctx)
+        self._teardown_hardware(ctx.hardware)
         logger.info("DAgger strategy teardown complete")
 
     # ------------------------------------------------------------------
@@ -429,8 +429,7 @@ class DAggerStrategy(RolloutStrategy):
         record_stride = max(1, cfg.interpolation_multiplier)
         record_autonomous = self.config.record_autonomous
 
-        ordered_keys = ctx.data.ordered_action_keys
-        features = dataset.features
+        features = ctx.data.dataset_features
 
         engine.reset()
         interpolator.reset()
@@ -499,9 +498,7 @@ class DAggerStrategy(RolloutStrategy):
                     timestamp = time.perf_counter() - start_t
                     continue
 
-                action_dict = send_next_action(
-                    engine, obs_processed, obs, ctx, interpolator, ordered_keys, features
-                )
+                action_dict = send_next_action(obs_processed, obs, ctx, interpolator)
 
                 if action_dict is not None:
                     last_action = ctx.processors.robot_action_processor((action_dict, obs))
