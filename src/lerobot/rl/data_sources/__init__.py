@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from lerobot.rl.data_sources.data_mixer import BatchType, DataMixer, OnlineOfflineMixer
+from .data_mixer import BatchType, DataMixer, OnlineOfflineMixer
 
 __all__ = ["BatchType", "DataMixer", "OnlineOfflineMixer"]

@@ -24,7 +24,7 @@ import pytest
 
 pytest.importorskip("grpc")
 
-from lerobot.rl.process import ProcessSignalHandler  # noqa: E402
+from lerobot.rl.process import ProcessSignalHandler
 
 
 # Fixture to reset shutdown_event_counter and original signal handlers before and after each test

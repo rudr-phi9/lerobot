@@ -16,19 +16,29 @@
 Reinforcement learning modules.
 
 Requires: ``pip install 'lerobot[hilserl]'``
-
-Available modules (import directly)::
-
-    from lerobot.rl.actor import ...
-    from lerobot.rl.learner import ...
-    from lerobot.rl.learner_service import ...
-    from lerobot.rl.buffer import ...
-    from lerobot.rl.eval_policy import ...
-    from lerobot.rl.gym_manipulator import ...
 """
 
 from lerobot.utils.import_utils import require_package
 
 require_package("grpcio", extra="hilserl", import_name="grpc")
 
-__all__: list[str] = []
+from .algorithms.base import RLAlgorithm as RLAlgorithm
+from .algorithms.configs import RLAlgorithmConfig as RLAlgorithmConfig, TrainingStats as TrainingStats
+from .algorithms.factory import make_algorithm as make_algorithm
+from .algorithms.sac import SACAlgorithm as SACAlgorithm, SACAlgorithmConfig as SACAlgorithmConfig
+from .buffer import ReplayBuffer as ReplayBuffer
+from .data_sources import DataMixer as DataMixer, OnlineOfflineMixer as OnlineOfflineMixer
+from .trainer import RLTrainer as RLTrainer
+
+__all__ = [
+    "RLAlgorithm",
+    "RLAlgorithmConfig",
+    "TrainingStats",
+    "make_algorithm",
+    "SACAlgorithm",
+    "SACAlgorithmConfig",
+    "RLTrainer",
+    "ReplayBuffer",
+    "DataMixer",
+    "OnlineOfflineMixer",
+]
