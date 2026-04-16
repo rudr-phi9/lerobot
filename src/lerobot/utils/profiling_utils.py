@@ -343,6 +343,8 @@ class TrainingProfiler:
             output_dir=self._output_dir,
             device_type=self._device.type,
         )
+        if self._device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def __enter__(self) -> TrainingProfiler:
         if self._device.type == "cuda":
