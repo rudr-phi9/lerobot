@@ -302,14 +302,24 @@ class VLABenchEnv(gym.Env):
                 f"but got shape {action.shape} with ndim={action.ndim}"
             )
 
-        # VLABench uses dm_control TimeStep — convert action format
-        if self.action_mode == "eef":
-            # action: pos(3) + euler(3) + gripper(1) → absolute EEF
-            timestep = self._env.step(action)
-        elif self.action_mode == "joint" or self.action_mode == "delta_eef":
-            timestep = self._env.step(action)
-        else:
+        # VLABench's dm_control task does `data.ctrl[:] = action` without adapting
+        # shapes. Franka in VLABench has 9 actuators (7 arm joints + 2 gripper
+        # fingers), but our policy emits a 7D action. Pad with zeros / repeat the
+        # last value so the broadcast succeeds.
+        assert self._physics is not None
+        ctrl_dim = int(self._physics.data.ctrl.shape[0])
+        if action.shape[0] != ctrl_dim:
+            padded = np.zeros(ctrl_dim, dtype=action.dtype)
+            padded[: min(action.shape[0], ctrl_dim)] = action[:ctrl_dim]
+            if action.shape[0] < ctrl_dim:
+                # Repeat the last entry (typically the gripper command) for the
+                # trailing extra actuators.
+                padded[action.shape[0] :] = action[-1]
+            action = padded
+
+        if self.action_mode not in ("eef", "joint", "delta_eef"):
             raise ValueError(f"Unknown action_mode: {self.action_mode}")
+        timestep = self._env.step(action)
 
         # Extract reward from dm_control timestep
         reward = float(timestep.reward) if timestep.reward is not None else 0.0
