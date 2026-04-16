@@ -21,10 +21,12 @@
 FROM huggingface/lerobot-gpu:latest
 
 # Install VLABench from GitHub (not on PyPI) and pin MuJoCo/dm-control.
-RUN uv pip install --no-cache \
-      "vlabench @ git+https://github.com/OpenMOSS/VLABench.git" \
-      mujoco==3.2.2 dm-control==1.0.22 && \
-    python -c "from VLABench.utils import download_assets; download_assets()"
+# Clone without recursive submodules to avoid SSH-only nested submodules
+# (third_party/openpi/third_party/{aloha,libero} use git@github.com URLs).
+RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git /tmp/VLABench && \
+    uv pip install --no-cache /tmp/VLABench mujoco==3.2.2 dm-control==1.0.22 && \
+    python -c "from VLABench.utils import download_assets; download_assets()" && \
+    rm -rf /tmp/VLABench
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
