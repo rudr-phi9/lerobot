@@ -12,11 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from lerobot.rewards.classifier.configuration_classifier import (
-    RewardClassifierConfig as RewardClassifierConfig,
-)
-from lerobot.rewards.sarm.configuration_sarm import SARMConfig as SARMConfig
-
 from .act.configuration_act import ACTConfig as ACTConfig
 from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
 from .factory import get_policy_class, make_policy, make_policy_config, make_pre_post_processors
@@ -48,9 +43,7 @@ __all__ = [
     "PI0Config",
     "PI0FastConfig",
     "PI05Config",
-    "RewardClassifierConfig",
     "SACConfig",
-    "SARMConfig",
     "SmolVLAConfig",
     "TDMPCConfig",
     "VQBeTConfig",
