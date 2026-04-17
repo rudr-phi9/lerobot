@@ -66,7 +66,7 @@ class SentryStrategyConfig(RolloutStrategyConfig):
     uploaded in the background every ``upload_every_n_episodes`` episodes.
     """
 
-    episode_duration_s: float = 120.0
+    episode_duration_s: float = 20.0
     upload_every_n_episodes: int = 5
 
 
@@ -87,6 +87,32 @@ class HighlightStrategyConfig(RolloutStrategyConfig):
     push_key: str = "h"
 
 
+@dataclass
+class DAggerKeyboardConfig:
+    """Keyboard key bindings for DAgger controls.
+
+    Keys are specified as single characters (e.g. ``"c"``, ``"h"``) or
+    special key names (``"space"``).
+    """
+
+    pause_resume: str = "space"
+    correction: str = "c"
+    upload: str = "h"
+
+
+@dataclass
+class DAggerPedalConfig:
+    """Foot pedal configuration for DAgger controls.
+
+    Pedal codes are evdev key code strings (e.g. ``"KEY_A"``).
+    """
+
+    device_path: str = "/dev/input/by-id/usb-PCsensor_FootSwitch-event-kbd"
+    pause_resume: str = "KEY_A"
+    correction: str = "KEY_B"
+    upload: str = "KEY_C"
+
+
 @RolloutStrategyConfig.register_subclass("dagger")
 @dataclass
 class DAggerStrategyConfig(RolloutStrategyConfig):
@@ -95,19 +121,30 @@ class DAggerStrategyConfig(RolloutStrategyConfig):
     Alternates between autonomous policy execution and human intervention.
     Intervention frames are tagged with ``intervention=True``.
 
+    Input is controlled via either a keyboard or foot pedal, selected by
+    ``input_device``.  Each device exposes three actions:
+
+    1. **pause_resume** — toggle policy execution on/off.
+    2. **correction** — toggle human correction recording.
+    3. **upload** — push dataset to hub on demand (corrections-only mode).
+
     When ``record_autonomous=True`` (default) both autonomous and correction
-    frames are recorded — this requires streaming encoding so the policy
-    loop never blocks on disk I/O.  Set to ``False`` to record only the
-    human-correction windows; encoding can then happen between phases.
+    frames are recorded with sentry-like time-based episode rotation and
+    background uploading.  Set to ``False`` to record only the human-correction
+    windows, where each correction becomes its own episode.
     """
 
-    episode_time_s: float = 120.0
-    num_episodes: int = 50
-    play_sounds: bool = True
-    calibrate: bool = False
-    log_hz: bool = True
-    hz_log_interval_s: float = 2.0
-    record_autonomous: bool = True
+    episode_time_s: float = 20.0
+    num_episodes: int = 10
+    record_autonomous: bool = False
+    upload_every_n_episodes: int = 5
+    input_device: str = "keyboard"
+    keyboard: DAggerKeyboardConfig = field(default_factory=DAggerKeyboardConfig)
+    pedal: DAggerPedalConfig = field(default_factory=DAggerPedalConfig)
+
+    def __post_init__(self):
+        if self.input_device not in ("keyboard", "pedal"):
+            raise ValueError(f"DAgger input_device must be 'keyboard' or 'pedal', got '{self.input_device}'")
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +197,7 @@ class RolloutConfig:
         if isinstance(self.strategy, DAggerStrategyConfig) and self.teleop is None:
             raise ValueError("DAgger strategy requires --teleop.type to be set")
 
-        needs_dataset = isinstance(
-            self.strategy, (SentryStrategyConfig, HighlightStrategyConfig, DAggerStrategyConfig)
-        )
+        needs_dataset = isinstance(self.strategy, (SentryStrategyConfig, HighlightStrategyConfig))
         if needs_dataset and (self.dataset is None or not self.dataset.repo_id):
             raise ValueError(f"{self.strategy.type} strategy requires --dataset.repo_id to be set")
 

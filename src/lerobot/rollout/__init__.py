@@ -16,6 +16,8 @@
 
 from .configs import (
     BaseStrategyConfig,
+    DAggerKeyboardConfig,
+    DAggerPedalConfig,
     DAggerStrategyConfig,
     DatasetRecordConfig,
     HighlightStrategyConfig,
@@ -39,6 +41,8 @@ from .strategies import RolloutStrategy, create_strategy
 
 __all__ = [
     "BaseStrategyConfig",
+    "DAggerKeyboardConfig",
+    "DAggerPedalConfig",
     "DAggerStrategyConfig",
     "HighlightStrategyConfig",
     "InferenceEngine",

@@ -234,6 +234,18 @@ def build_rollout_context(
         teleop = make_teleoperator_from_config(cfg.teleop)
         teleop.connect()
 
+    # DAgger requires teleop with motor control capabilities (enable_torque,
+    # disable_torque, write_goal_positions).
+    if isinstance(cfg.strategy, DAggerStrategyConfig) and teleop is not None:
+        required_teleop_methods = ("enable_torque", "disable_torque", "write_goal_positions")
+        missing = [m for m in required_teleop_methods if not callable(getattr(teleop, m, None))]
+        if missing:
+            teleop.disconnect()
+            raise ValueError(
+                f"DAgger strategy requires a teleoperator with motor control methods "
+                f"{required_teleop_methods}. '{type(teleop).__name__}' is missing: {missing}"
+            )
+
     # --- 4. Features + action-key reconciliation ---------------------
     all_obs_features = robot.observation_features
     observation_features_hw = {
