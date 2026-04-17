@@ -28,18 +28,18 @@ VLABench ships two task suites covering **43 task categories** in LeRobot's `--e
 
 ## Installation
 
-After following the standard LeRobot installation instructions:
+VLABench is **not on PyPI** — its only distribution is the [OpenMOSS/VLABench](https://github.com/OpenMOSS/VLABench) GitHub repo — so LeRobot does not expose a `vlabench` extra. Install it manually as an editable clone, alongside the MuJoCo / dm_control pins VLABench needs, then fetch the mesh assets:
 
 ```bash
-pip install -e ".[vlabench]"
-```
+# After following the standard LeRobot installation instructions.
 
-VLABench also ships simulation assets separately. Clone the repo and download them:
+git clone https://github.com/OpenMOSS/VLABench.git ~/VLABench
+git clone https://github.com/motion-planning/rrt-algorithms.git ~/rrt-algorithms
+pip install -e ~/VLABench -e ~/rrt-algorithms
+pip install "mujoco==3.2.2" "dm-control==1.0.22" \
+            open3d colorlog scikit-learn openai gdown
 
-```bash
-git clone https://github.com/OpenMOSS/VLABench.git
-cd VLABench
-python scripts/download_assets.py
+python ~/VLABench/scripts/download_assets.py
 ```
 
 <Tip>
