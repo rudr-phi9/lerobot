@@ -30,6 +30,7 @@ from lerobot.utils.sample_weighting import SampleWeightingConfig
 
 from .default import DatasetConfig, EvalConfig, PeftConfig, WandBConfig
 from .policies import PreTrainedConfig
+from .rewards import RewardModelConfig
 
 TRAIN_CONFIG_NAME = "train_config.json"
 
@@ -39,6 +40,7 @@ class TrainPipelineConfig(HubMixin):
     dataset: DatasetConfig
     env: envs.EnvConfig | None = None
     policy: PreTrainedConfig | None = None
+    reward_model: RewardModelConfig | None = None
     # Set `dir` to where you would like to save all of the run outputs. If you run another training session
     # with the same value for `dir` its contents will be overwritten unless you set `resume` to true.
     output_dir: Path | None = None
@@ -78,16 +80,34 @@ class TrainPipelineConfig(HubMixin):
     rename_map: dict[str, str] = field(default_factory=dict)
     checkpoint_path: Path | None = field(init=False, default=None)
 
+    @property
+    def is_reward_model_training(self) -> bool:
+        """True when the config targets a reward model rather than a policy."""
+        return self.reward_model is not None
+
+    @property
+    def trainable_config(self) -> PreTrainedConfig | RewardModelConfig:
+        """Return whichever config (policy or reward_model) is active."""
+        if self.is_reward_model_training:
+            return self.reward_model  # type: ignore[return-value]
+        return self.policy  # type: ignore[return-value]
+
     def validate(self) -> None:
         # HACK: We parse again the cli args here to get the pretrained paths if there was some.
         policy_path = parser.get_path_arg("policy")
-        if policy_path:
-            # Only load the policy config
+        reward_model_path = parser.get_path_arg("reward_model")
+
+        if reward_model_path:
+            cli_overrides = parser.get_cli_overrides("reward_model")
+            self.reward_model = RewardModelConfig.from_pretrained(
+                reward_model_path, cli_overrides=cli_overrides
+            )
+            self.reward_model.pretrained_path = str(Path(reward_model_path))
+        elif policy_path:
             cli_overrides = parser.get_cli_overrides("policy")
             self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
             self.policy.pretrained_path = Path(policy_path)
         elif self.resume:
-            # The entire train config is already loaded, we just need to get the checkpoint dir
             config_path = parser.parse_arg("config_path")
             if not config_path:
                 raise ValueError(
@@ -103,18 +123,22 @@ class TrainPipelineConfig(HubMixin):
             policy_dir = Path(config_path).parent
             if self.policy is not None:
                 self.policy.pretrained_path = policy_dir
+            if self.reward_model is not None:
+                self.reward_model.pretrained_path = str(policy_dir)
             self.checkpoint_path = policy_dir.parent
 
-        if self.policy is None:
+        if self.policy is None and self.reward_model is None:
             raise ValueError(
-                "Policy is not configured. Please specify a pretrained policy with `--policy.path`."
+                "Neither policy nor reward_model is configured. "
+                "Please specify one with `--policy.path` or `--reward_model.path`."
             )
 
+        active_cfg = self.trainable_config
         if not self.job_name:
             if self.env is None:
-                self.job_name = f"{self.policy.type}"
+                self.job_name = f"{active_cfg.type}"
             else:
-                self.job_name = f"{self.env.type}_{self.policy.type}"
+                self.job_name = f"{self.env.type}_{active_cfg.type}"
 
         if not self.resume and isinstance(self.output_dir, Path) and self.output_dir.is_dir():
             raise FileExistsError(
@@ -132,13 +156,11 @@ class TrainPipelineConfig(HubMixin):
         if not self.use_policy_training_preset and (self.optimizer is None or self.scheduler is None):
             raise ValueError("Optimizer and Scheduler must be set when the policy presets are not used.")
         elif self.use_policy_training_preset and not self.resume:
-            self.optimizer = self.policy.get_optimizer_preset()
-            self.scheduler = self.policy.get_scheduler_preset()
+            self.optimizer = active_cfg.get_optimizer_preset()
+            self.scheduler = active_cfg.get_scheduler_preset()
 
-        if self.policy.push_to_hub and not self.policy.repo_id:
-            raise ValueError(
-                "'policy.repo_id' argument missing. Please specify it to push the model to the hub."
-            )
+        if hasattr(active_cfg, "push_to_hub") and active_cfg.push_to_hub and not active_cfg.repo_id:
+            raise ValueError("'repo_id' argument missing. Please specify it to push the model to the hub.")
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

@@ -55,6 +55,14 @@ class RewardModelConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
 
     pretrained_path: str | None = None
 
+    push_to_hub: bool = False
+    repo_id: str | None = None
+
+    # Hub metadata
+    license: str | None = None
+    tags: list[str] | None = None
+    private: bool | None = None
+
     @property
     def type(self) -> str:
         choice_name = self.get_choice_name(self.__class__)
