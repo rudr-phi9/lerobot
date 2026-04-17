@@ -25,6 +25,7 @@ with long-horizon reasoning, built on MuJoCo/dm_control.
 
 from __future__ import annotations
 
+import contextlib
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from functools import partial
@@ -181,30 +182,54 @@ class VLABenchEnv(gym.Env):
             low=ACTION_LOW, high=ACTION_HIGH, shape=(ACTION_DIM,), dtype=np.float32
         )
 
+    # Max attempts to rebuild the underlying env when MuJoCo throws
+    # `PhysicsError` (e.g. mjWARN_BADQACC) during VLABench's 20-step
+    # reset warm-up. Some random task/layout samples land in unstable
+    # initial configurations; re-sampling the layout almost always
+    # gives a stable one.
+    _ENSURE_ENV_MAX_ATTEMPTS = 5
+
     def _ensure_env(self) -> None:
         """Create the underlying VLABench env on first use.
 
         Called inside the worker subprocess after fork(), so each worker gets
         its own clean rendering context rather than inheriting a stale one from
         the parent process (which causes crashes with AsyncVectorEnv).
+
+        Retries on `PhysicsError`: VLABench's `LM4ManipDMEnv.reset()` runs 20
+        warm-up `step()` calls while toggling gravity/fluids to let the scene
+        settle; for some random layouts MuJoCo's integrator diverges and
+        raises `mjWARN_BADQACC`. Re-sampling the layout almost always yields
+        a stable one, so we retry a few times before giving up.
         """
         if self._env is not None:
             return
 
         import VLABench.robots  # noqa: F401  # type: ignore[import-untyped]
         import VLABench.tasks  # noqa: F401  # type: ignore[import-untyped]
+        from dm_control.rl.control import PhysicsError  # type: ignore[import-untyped]
         from VLABench.envs import load_env  # type: ignore[import-untyped]
 
         h, w = self.render_resolution
-        env = load_env(
-            task=self.task,
-            robot=self.robot,
-            render_resolution=(h, w),
-        )
-        self._env = env
+        last_exc: PhysicsError | None = None
+        for attempt in range(1, self._ENSURE_ENV_MAX_ATTEMPTS + 1):
+            try:
+                env = load_env(task=self.task, robot=self.robot, render_resolution=(h, w))
+                self._env = env
+                break
+            except PhysicsError as exc:
+                last_exc = exc
+                print(
+                    f"[vlabench] PhysicsError on attempt {attempt}/"
+                    f"{self._ENSURE_ENV_MAX_ATTEMPTS} while building task "
+                    f"'{self.task}': {exc}. Retrying with fresh layout…"
+                )
+        if self._env is None:
+            assert last_exc is not None
+            raise last_exc
 
         # Extract task description from the dm_control task
-        task_obj = env.task
+        task_obj = self._env.task
         if hasattr(task_obj, "task_description"):
             self.task_description = task_obj.task_description
         elif hasattr(task_obj, "language_instruction"):
@@ -374,6 +399,8 @@ class VLABenchEnv(gym.Env):
         return observation, info
 
     def step(self, action: np.ndarray) -> tuple[RobotObservation, float, bool, bool, dict[str, Any]]:
+        from dm_control.rl.control import PhysicsError  # type: ignore[import-untyped]
+
         self._ensure_env()
         assert self._env is not None
 
@@ -391,7 +418,20 @@ class VLABenchEnv(gym.Env):
         physics = self._env.physics
         ctrl_dim = int(physics.data.ctrl.shape[0])
         ctrl = self._build_ctrl_from_action(action, ctrl_dim)
-        timestep = self._env.step(ctrl)
+        try:
+            timestep = self._env.step(ctrl)
+        except PhysicsError as exc:
+            # Physics integrator diverged (e.g. mjWARN_BADQACC). Treat it as
+            # a graceful failed termination rather than a hard crash — the
+            # rest of the multi-task eval should still run.
+            print(f"[vlabench] PhysicsError during step on task '{self.task}': {exc}. Terminating episode.")
+            observation = self._get_obs()
+            info = {"task": self.task, "is_success": False, "physics_error": True}
+            # Drop the stale env so the next reset() rebuilds it cleanly.
+            with contextlib.suppress(Exception):
+                self._env.close()
+            self._env = None
+            return observation, 0.0, True, False, info
 
         # Extract reward from dm_control timestep
         reward = float(timestep.reward) if timestep.reward is not None else 0.0
