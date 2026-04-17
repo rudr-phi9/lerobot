@@ -47,7 +47,7 @@ from lerobot.datasets import EpisodeAwareSampler, make_dataset
 from lerobot.envs import close_envs, make_env, make_env_pre_post_processors
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies import PreTrainedPolicy, make_policy, make_pre_post_processors
-from lerobot.rewards.factory import make_reward_pre_post_processors
+from lerobot.rewards import make_reward_pre_post_processors
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
@@ -250,26 +250,37 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
         logging.info("Creating env")
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
-    if is_main_process:
-        logging.info("Creating policy")
-    policy = make_policy(
-        cfg=cfg.policy,
-        ds_meta=dataset.meta,
-        rename_map=cfg.rename_map,
-    )
+    if cfg.is_reward_model_training:
+        if is_main_process:
+            logging.info("Creating reward model")
+        from lerobot.rewards import make_reward_model
+
+        policy = make_reward_model(
+            cfg=cfg.reward_model,
+            dataset_stats=dataset.meta.stats,
+            dataset_meta=dataset.meta,
+        )
+    else:
+        if is_main_process:
+            logging.info("Creating policy")
+        policy = make_policy(
+            cfg=cfg.policy,
+            ds_meta=dataset.meta,
+            rename_map=cfg.rename_map,
+        )
 
     if cfg.peft is not None:
         logging.info("Using PEFT! Wrapping model.")
-        # Convert CLI peft config to dict for overrides
         peft_cli_overrides = dataclasses.asdict(cfg.peft)
         policy = policy.wrap_with_peft(peft_cli_overrides=peft_cli_overrides)
 
-    # Wait for all processes to finish policy creation before continuing
+    # Wait for all processes to finish model creation before continuing
     accelerator.wait_for_everyone()
 
-    processor_pretrained_path = cfg.policy.pretrained_path
+    active_cfg = cfg.trainable_config
+    processor_pretrained_path = active_cfg.pretrained_path
     if (
-        getattr(cfg.policy, "use_relative_actions", False)
+        getattr(active_cfg, "use_relative_actions", False)
         and processor_pretrained_path is not None
         and not cfg.resume
     ):
@@ -279,18 +290,15 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
         )
         processor_pretrained_path = None
 
-    # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
     postprocessor_kwargs = {}
     if (processor_pretrained_path and not cfg.resume) or not processor_pretrained_path:
-        # Only provide dataset_stats when not resuming from saved processor state
         processor_kwargs["dataset_stats"] = dataset.meta.stats
 
-    # For SARM, always provide dataset_meta for progress normalization
-    if cfg.policy.type == "sarm":
+    if cfg.is_reward_model_training and cfg.reward_model.type == "sarm":
         processor_kwargs["dataset_meta"] = dataset.meta
 
-    if processor_pretrained_path is not None:
+    if not cfg.is_reward_model_training and processor_pretrained_path is not None:
         processor_kwargs["preprocessor_overrides"] = {
             "device_processor": {"device": device.type},
             "normalizer_processor": {
@@ -310,11 +318,9 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
             },
         }
 
-    from lerobot.configs.rewards import RewardModelConfig
-
-    if isinstance(cfg.policy, RewardModelConfig):
+    if cfg.is_reward_model_training:
         preprocessor, postprocessor = make_reward_pre_post_processors(
-            cfg.policy,
+            cfg.reward_model,
             **processor_kwargs,
         )
     else:
