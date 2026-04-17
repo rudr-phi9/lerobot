@@ -354,6 +354,8 @@ jobs:
           push: false
           load: true
           tags: lerobot-benchmark-vlabench:ci
+          build-args: |
+            VLABENCH_ASSETS_REPO=lerobot/vlabench-assets
 
       - name: Run VLABench smoke eval (1 episode)
         if: env.HF_USER_TOKEN != ''
