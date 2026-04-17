@@ -165,7 +165,8 @@ class DAggerEvents:
 # Teleoperator helpers
 # ---------------------------------------------------------------------------
 
-
+# TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+# user is responsible for moving the teleop to the same position as the robot when starting the correction.
 def _teleop_smooth_move_to(
     teleop: Teleoperator, target_pos: dict, duration_s: float = 2.0, fps: int = 50
 ) -> None:
@@ -375,7 +376,9 @@ class DAggerStrategy(RolloutStrategy):
         engine.reset()
         interpolator.reset()
         events.reset()
-        teleop.disable_torque()
+        # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+        # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+        # teleop.disable_torque()
         engine.resume()
 
         last_action: dict[str, Any] | None = None
@@ -469,7 +472,9 @@ class DAggerStrategy(RolloutStrategy):
 
             finally:
                 engine.pause()
-                teleop.disable_torque()
+                # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+                # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+                # teleop.disable_torque()
                 with contextlib.suppress(Exception):
                     with self._episode_lock:
                         dataset.save_episode()
@@ -503,7 +508,9 @@ class DAggerStrategy(RolloutStrategy):
         engine.reset()
         interpolator.reset()
         events.reset()
-        teleop.disable_torque()
+        # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+        # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+        # teleop.disable_torque()
         engine.resume()
 
         last_action: dict[str, Any] | None = None
@@ -586,7 +593,9 @@ class DAggerStrategy(RolloutStrategy):
 
             finally:
                 engine.pause()
-                teleop.disable_torque()
+                # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+                # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+                # teleop.disable_torque()
                 with contextlib.suppress(Exception):
                     with self._episode_lock:
                         dataset.save_episode()
@@ -609,13 +618,18 @@ class DAggerStrategy(RolloutStrategy):
         if old_phase == DAggerPhase.AUTONOMOUS and new_phase == DAggerPhase.PAUSED:
             engine.pause()
             obs = robot.get_observation()
-            robot_pos = {
+            _robot_pos = {
                 k: v for k, v in obs.items() if k.endswith(".pos") and k in robot.observation_features
             }
-            _teleop_smooth_move_to(teleop, robot_pos, duration_s=2.0, fps=50)
+            # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+            # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+            # _teleop_smooth_move_to(teleop, robot_pos, duration_s=2.0, fps=50)
 
         elif new_phase == DAggerPhase.CORRECTING:
-            teleop.disable_torque()
+            # TODO(Steven): either enforce this (meaning all teleop must implement these methods) or
+            # user is responsible for moving the teleop to the same position as the robot when starting the correction.
+            # teleop.disable_torque()
+            pass
 
         elif new_phase == DAggerPhase.AUTONOMOUS:
             interpolator.reset()

@@ -96,8 +96,8 @@ class DAggerKeyboardConfig:
     """
 
     pause_resume: str = "space"
-    correction: str = "c"
-    upload: str = "h"
+    correction: str = "tab"
+    upload: str = "enter"
 
 
 @dataclass
