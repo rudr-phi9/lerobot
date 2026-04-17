@@ -136,8 +136,10 @@ class VLABenchEnv(gym.Env):
 
         # Deferred — created on first reset() inside worker subprocess to avoid
         # inheriting stale GPU/EGL contexts when AsyncVectorEnv spawns workers.
+        # We never cache `env.physics`: dm_control exposes it as a weakref
+        # proxy that goes stale across resets (rebuilds the sim), so we always
+        # refetch it via `self._env.physics` at the call site.
         self._env = None
-        self._physics = None
         self.task_description = ""  # populated on first reset
 
         h, w = self.render_resolution
@@ -200,7 +202,6 @@ class VLABenchEnv(gym.Env):
             render_resolution=(h, w),
         )
         self._env = env
-        self._physics = env.physics
 
         # Extract task description from the dm_control task
         task_obj = env.task
@@ -337,9 +338,10 @@ class VLABenchEnv(gym.Env):
         site_name = robot.end_effector_site.full_identifier
 
         # Important: inplace=False so IK doesn't mutate physics state mid-step;
-        # we only want the solved qpos.
+        # we only want the solved qpos. Fetch a fresh physics handle — caching
+        # it can yield a stale weakref after a reset.
         ik_result = qpos_from_site_pose(
-            self._physics,
+            self._env.physics,
             site_name=site_name,
             target_pos=pos,
             target_quat=quat,
@@ -374,7 +376,6 @@ class VLABenchEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[RobotObservation, float, bool, bool, dict[str, Any]]:
         self._ensure_env()
         assert self._env is not None
-        assert self._physics is not None
 
         if action.ndim != 1:
             raise ValueError(
@@ -385,7 +386,10 @@ class VLABenchEnv(gym.Env):
         if self.action_mode not in ("eef", "joint", "delta_eef"):
             raise ValueError(f"Unknown action_mode: {self.action_mode}")
 
-        ctrl_dim = int(self._physics.data.ctrl.shape[0])
+        # Always refetch physics — dm_control returns a weakref proxy that can
+        # go stale across resets.
+        physics = self._env.physics
+        ctrl_dim = int(physics.data.ctrl.shape[0])
         ctrl = self._build_ctrl_from_action(action, ctrl_dim)
         timestep = self._env.step(ctrl)
 
@@ -395,7 +399,7 @@ class VLABenchEnv(gym.Env):
         # Check success via the task's termination condition
         is_success = False
         if hasattr(self._env, "task") and hasattr(self._env.task, "should_terminate_episode"):
-            is_success = bool(self._env.task.should_terminate_episode(self._physics))
+            is_success = bool(self._env.task.should_terminate_episode(self._env.physics))
 
         terminated = is_success
         truncated = False
@@ -420,7 +424,6 @@ class VLABenchEnv(gym.Env):
         if self._env is not None:
             self._env.close()
             self._env = None
-            self._physics = None
 
 
 # ---- Factory helpers ---------------------------------------------------------
