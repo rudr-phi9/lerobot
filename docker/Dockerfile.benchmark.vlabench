@@ -42,8 +42,9 @@ p.write_text(t.replace( \
       open3d colorlog scikit-learn openai gdown
 
 # Download VLABench mesh assets. Task configs reference object meshes
-# (obj/meshes/fruit/, containers/basket/, etc.); without them the task builder
-# picks from an empty mesh list and crashes at task-build time.
+# (obj/meshes/fruit/, containers/basket/, tablewares/plates/, etc.); without
+# them the task builder picks from an empty mesh list and crashes with
+# IndexError at task-build time (random.choice([]) in config_manager.py).
 #
 # Preferred source: an HF Hub mirror. Set VLABENCH_ASSETS_REPO at build time
 # (e.g. --build-arg VLABENCH_ASSETS_REPO=lerobot/vlabench-assets) and we'll
@@ -51,20 +52,36 @@ p.write_text(t.replace( \
 # path for CI — Google Drive frequently returns HTTP 429 ("Too many users have
 # viewed or downloaded this file recently") on shared academic files.
 #
-# Fallback: VLABench's own gdown-based script. Best-effort only; the build
-# will NOT fail if gdown hits a Drive quota, letting us ship an image where
-# task-build may still IndexError but the rest of the pipeline is exercised.
+# After download we *validate* that at least one XML exists under each
+# task-critical subtree and fail the build loudly if not. Silent-empty asset
+# dirs are the #1 cause of VLABench runtime crashes in CI, so we surface them
+# here rather than after a 10-minute eval build.
+#
+# Fallback: VLABench's own gdown-based script. Best-effort only.
 ARG VLABENCH_ASSETS_REPO=""
 RUN ASSETS_DIR="$HOME/VLABench/VLABench/assets" && \
     if [ -n "${VLABENCH_ASSETS_REPO}" ]; then \
         echo "Downloading VLABench assets from HF Hub: ${VLABENCH_ASSETS_REPO}" && \
+        uv pip install --no-cache "huggingface_hub[hf_xet]>=0.26" && \
         python -c "from huggingface_hub import snapshot_download; \
-snapshot_download(repo_id='${VLABENCH_ASSETS_REPO}', repo_type='dataset', local_dir='${ASSETS_DIR}')"; \
+p = snapshot_download(repo_id='${VLABENCH_ASSETS_REPO}', repo_type='dataset', \
+    local_dir='${ASSETS_DIR}', allow_patterns=['obj/**', 'scenes/**']); \
+print('snapshot_download returned:', p)"; \
     else \
         echo "No VLABENCH_ASSETS_REPO set — falling back to gdown (best-effort)" && \
         python ~/VLABench/scripts/download_assets.py --choice all || \
-          echo "WARN: VLABench asset download failed (likely Google Drive quota). Env task-build may crash."; \
-    fi
+          echo "WARN: VLABench asset download failed (likely Google Drive quota)."; \
+    fi && \
+    python -c "\
+from pathlib import Path; \
+import sys; \
+root = Path('${ASSETS_DIR}'); \
+checks = ['obj/meshes/tablewares/plates', 'obj/meshes/containers/basket', 'obj/meshes/fruit', 'obj/meshes/containers/tray']; \
+failed = []; \
+print(f'Validating VLABench assets under {root}'); \
+[print(f'  {c}: {len(list((root/c).rglob(\"*.xml\")))} XMLs') for c in checks]; \
+[failed.append(c) for c in checks if not any((root/c).rglob('*.xml'))]; \
+sys.exit(f'Empty asset dirs (no *.xml): {failed}') if failed else print('All asset dirs populated.')"
 
 # Overlay the PR's source code on top of the nightly image.
 COPY --chown=user_lerobot:user_lerobot . .
