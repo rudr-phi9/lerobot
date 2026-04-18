@@ -457,14 +457,10 @@ class SACAlgorithm(RLAlgorithm):
             policy (nn.Module): The policy model containing the actor, critic, and temperature components.
 
         Returns:
-            Tuple[Dict[str, torch.optim.Optimizer], Optional[torch.optim.lr_scheduler._LRScheduler]]:
-            A tuple containing:
-            - `optimizers`: A dictionary mapping component names ("actor", "critic", "temperature") to their respective Adam optimizers.
-            - `lr_scheduler`: Currently set to `None` but can be extended to support learning rate scheduling.
-
+            A dictionary mapping component names ("actor", "critic", "temperature")
+            to their respective Adam optimizers.
         """
         actor_params = self.policy.get_optim_params()["actor"]
-        lr_scheduler = None
         self.optimizers = {
             "actor": torch.optim.Adam(actor_params, lr=self.config.actor_lr),
             "critic": torch.optim.Adam(self.critic_ensemble.parameters(), lr=self.config.critic_lr),
@@ -474,7 +470,7 @@ class SACAlgorithm(RLAlgorithm):
             self.optimizers["discrete_critic"] = torch.optim.Adam(
                 self.discrete_critic.parameters(), lr=self.config.critic_lr
             )
-        return self.optimizers, lr_scheduler
+        return self.optimizers
 
     def get_optimizers(self) -> dict[str, Optimizer]:
         return self.optimizers
