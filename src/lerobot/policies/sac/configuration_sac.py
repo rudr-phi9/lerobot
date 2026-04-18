@@ -122,7 +122,7 @@ class SACConfig(PreTrainedConfig):
     device: str = "cpu"
     # Device to store the model on
     storage_device: str = "cpu"
-    # Name of the vision encoder model (Set to "helper2424/resnet10" for hil serl resnet10)
+    # Name of the vision encoder model (Set to "lerobot/resnet10" for hil serl resnet10)
     vision_encoder_name: str | None = None
     # Whether to freeze the vision encoder during training
     freeze_vision_encoder: bool = True

@@ -31,7 +31,7 @@ class RewardClassifierConfig(PreTrainedConfig):
     latent_dim: int = 256
     image_embedding_pooling_dim: int = 8
     dropout_rate: float = 0.1
-    model_name: str = "helper2424/resnet10"
+    model_name: str = "lerobot/resnet10"
     device: str = "cpu"
     model_type: str = "cnn"  # "transformer" or "cnn"
     num_cameras: int = 2

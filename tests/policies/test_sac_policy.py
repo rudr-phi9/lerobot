@@ -304,7 +304,7 @@ def test_sac_training_with_visual_input(batch_size: int, state_dim: int, action_
 
 @pytest.mark.parametrize(
     "batch_size,state_dim,action_dim,vision_encoder_name",
-    [(1, 6, 6, "helper2424/resnet10"), (1, 6, 6, "facebook/convnext-base-224")],
+    [(1, 6, 6, "lerobot/resnet10"), (1, 6, 6, "facebook/convnext-base-224")],
 )
 @pytest.mark.skipif(not TRANSFORMERS_AVAILABLE, reason="Transformers are not installed")
 def test_sac_policy_with_pretrained_encoder(
