@@ -136,12 +136,13 @@ def test_sac_algorithm_config_registered():
 
 
 def test_sac_algorithm_config_from_policy_config():
-    """from_policy_config should copy relevant fields."""
+    """from_policy_config should copy algorithm hyperparameters from the policy config."""
     sac_cfg = _make_sac_config(utd_ratio=4, policy_update_freq=2)
     algo_cfg = SACAlgorithmConfig.from_policy_config(sac_cfg)
+    assert algo_cfg.sac_config is sac_cfg
     assert algo_cfg.utd_ratio == 4
     assert algo_cfg.policy_update_freq == 2
-    assert algo_cfg.clip_grad_norm == sac_cfg.grad_clip_norm
+    assert algo_cfg.grad_clip_norm == sac_cfg.grad_clip_norm
 
 
 # ===========================================================================

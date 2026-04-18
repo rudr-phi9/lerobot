@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from lerobot.policies.sac.configuration_sac import CriticNetworkConfig
+from lerobot.policies.sac.configuration_sac import CriticNetworkConfig, SACConfig
 from lerobot.rl.algorithms.configs import RLAlgorithmConfig
 
 if TYPE_CHECKING:
@@ -29,49 +29,54 @@ if TYPE_CHECKING:
 @RLAlgorithmConfig.register_subclass("sac")
 @dataclass
 class SACAlgorithmConfig(RLAlgorithmConfig):
-    """SAC-specific hyper-parameters that control the update loop."""
+    """SAC algorithm hyperparameters."""
 
-    utd_ratio: int = 1
-    policy_update_freq: int = 1
-    clip_grad_norm: float = 40.0
+    # Policy config
+    sac_config: SACConfig
+
+    # Optimizer learning rates
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
     temperature_lr: float = 3e-4
+
+    # Bellman update
     discount: float = 0.99
-    temperature_init: float = 1.0
-    target_entropy: float | None = None
     use_backup_entropy: bool = True
     critic_target_update_weight: float = 0.005
+
+    # Critic ensemble
     num_critics: int = 2
     num_subsample_critics: int | None = None
-    num_discrete_actions: int | None = None
-    shared_encoder: bool = True
     critic_network_kwargs: CriticNetworkConfig = field(default_factory=CriticNetworkConfig)
     discrete_critic_network_kwargs: CriticNetworkConfig = field(default_factory=CriticNetworkConfig)
-    use_torch_compile: bool = False
+
+    # Temperature / entropy
+    temperature_init: float = 1.0
+
+    # Update loop
+    utd_ratio: int = 1
+    policy_update_freq: int = 1
+    grad_clip_norm: float = 40.0
 
     @classmethod
-    def from_policy_config(cls, policy_cfg) -> SACAlgorithmConfig:
-        """Build from an existing ``SACConfig`` (cfg.policy) for backwards compat."""
+    def from_policy_config(cls, policy_cfg: SACConfig) -> SACAlgorithmConfig:
+        """Build an algorithm config by copying hyperparameters from the policy config."""
         return cls(
-            utd_ratio=policy_cfg.utd_ratio,
-            policy_update_freq=policy_cfg.policy_update_freq,
-            clip_grad_norm=policy_cfg.grad_clip_norm,
             actor_lr=policy_cfg.actor_lr,
             critic_lr=policy_cfg.critic_lr,
             temperature_lr=policy_cfg.temperature_lr,
             discount=policy_cfg.discount,
-            temperature_init=policy_cfg.temperature_init,
-            target_entropy=policy_cfg.target_entropy,
             use_backup_entropy=policy_cfg.use_backup_entropy,
             critic_target_update_weight=policy_cfg.critic_target_update_weight,
             num_critics=policy_cfg.num_critics,
             num_subsample_critics=policy_cfg.num_subsample_critics,
-            num_discrete_actions=policy_cfg.num_discrete_actions,
-            shared_encoder=policy_cfg.shared_encoder,
             critic_network_kwargs=policy_cfg.critic_network_kwargs,
             discrete_critic_network_kwargs=policy_cfg.discrete_critic_network_kwargs,
-            use_torch_compile=policy_cfg.use_torch_compile,
+            temperature_init=policy_cfg.temperature_init,
+            utd_ratio=policy_cfg.utd_ratio,
+            policy_update_freq=policy_cfg.policy_update_freq,
+            grad_clip_norm=policy_cfg.grad_clip_norm,
+            sac_config=policy_cfg,
         )
 
     def build_algorithm(self, policy: torch.nn.Module) -> SACAlgorithm:
