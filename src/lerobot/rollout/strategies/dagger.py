@@ -556,6 +556,7 @@ class DAggerStrategy(RolloutStrategy):
         engine.resume()
 
         last_action: dict[str, Any] | None = None
+        start_time = time.perf_counter()
         record_tick = 0
         recorded = 0
         logger.info(
@@ -570,6 +571,10 @@ class DAggerStrategy(RolloutStrategy):
                     and not ctx.runtime.shutdown_event.is_set()
                 ):
                     loop_start = time.perf_counter()
+
+                    if cfg.duration > 0 and (time.perf_counter() - start_time) >= cfg.duration:
+                        logger.info("Duration limit reached (%.0fs)", cfg.duration)
+                        break
 
                     # Process transitions
                     transition = events.consume_transition()

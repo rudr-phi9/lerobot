@@ -23,7 +23,6 @@ from .configs import (
     DAggerKeyboardConfig,
     DAggerPedalConfig,
     DAggerStrategyConfig,
-    DatasetRecordConfig,
     HighlightStrategyConfig,
     RolloutConfig,
     RolloutStrategyConfig,
