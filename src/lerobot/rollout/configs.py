@@ -142,7 +142,9 @@ class DAggerStrategyConfig(RolloutStrategyConfig):
     windows, where each correction becomes its own episode.
     """
 
-    num_episodes: int = 10
+    # Number of correction episodes to collect (corrections-only mode).
+    # When None, falls back to ``--dataset.num_episodes``.
+    num_episodes: int | None = None
     record_autonomous: bool = False
     upload_every_n_episodes: int = 5
     # Target video file size in MB for episode rotation (record_autonomous
@@ -256,6 +258,19 @@ class RolloutConfig:
                     "Streaming encoding is disabled for DAgger corrections-only mode. "
                     "Consider enabling it for faster episode saving: "
                     "--dataset.streaming_encoding=true --dataset.encoder_threads=2"
+                )
+
+        # DAgger: resolve num_episodes from dataset config when not explicitly set.
+        if isinstance(self.strategy, DAggerStrategyConfig) and self.strategy.num_episodes is None:
+            if self.dataset is not None:
+                self.strategy.num_episodes = self.dataset.num_episodes
+                logger.info(
+                    "DAgger num_episodes not set — using --dataset.num_episodes=%d",
+                    self.strategy.num_episodes,
+                )
+            else:
+                raise ValueError(
+                    "DAgger num_episodes must be set either via --strategy.num_episodes or --dataset.num_episodes"
                 )
 
         # --- Policy loading ---

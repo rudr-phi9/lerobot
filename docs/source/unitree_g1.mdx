@@ -274,7 +274,8 @@ python src/lerobot/scripts/lerobot_train.py \
 Once trained, we recommend deploying policies using inference-time RTC:
 
 ```bash
-python examples/rtc/eval_with_real_robot.py \
+lerobot-rollout \
+  --strategy.type=base \
   --policy.path=your-username/your-repo-id \
   --policy.device=cuda \
   --robot.type=unitree_g1 \

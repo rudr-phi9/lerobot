@@ -187,7 +187,7 @@ class TestRTCDenoiseWithRelativeLeftovers:
 
 
 class TestFullPipelineRelativeRTC:
-    """End-to-end test of the RTC + relative actions pipeline matching eval_with_real_robot.py flow."""
+    """End-to-end test of the RTC + relative actions pipeline matching lerobot-rollout flow."""
 
     def test_preprocessor_caches_state_for_postprocessor(self):
         """Preprocessor's relative step should cache state so postprocessor can convert back."""
@@ -240,7 +240,7 @@ class TestFullPipelineRelativeRTC:
         torch.testing.assert_close(recovered, actions, atol=1e-5, rtol=1e-5)
 
     def test_eval_loop_simulation(self):
-        """Simulate the eval_with_real_robot.py loop with relative actions.
+        """Simulate the lerobot-rollout loop with relative actions.
 
         Iteration 1: No leftovers → model generates relative actions → store for RTC
         Iteration 2: Use leftovers as RTC guidance → model generates new relative actions
@@ -401,12 +401,12 @@ class TestStateRebasingApproximation:
 
 
 def _detect_relative_actions(preprocessor) -> bool:
-    """Mirror of the helper in eval_with_real_robot.py for testing without importing it."""
+    """Mirror of the helper in lerobot-rollout for testing without importing it."""
     return any(isinstance(step, RelativeActionsProcessorStep) and step.enabled for step in preprocessor.steps)
 
 
 class TestDetectRelativeActions:
-    """Test the _detect_relative_actions helper logic used by eval_with_real_robot.py."""
+    """Test the _detect_relative_actions helper logic used by lerobot-rollout."""
 
     def test_detects_enabled_relative_step(self):
         class FakePipeline:
