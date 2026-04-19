@@ -19,46 +19,107 @@
 ``lerobot-rollout`` is the single CLI for running trained policies on
 real robots.
 
-    --strategy.type=base       24/7 autonomous rollout (no recording)
+Strategies
+----------
+    --strategy.type=base       Autonomous rollout, no recording
     --strategy.type=sentry     Continuous recording with auto-upload
     --strategy.type=highlight  Ring buffer + keystroke save
-    --strategy.type=dagger     Human-in-the-loop (DAgger/RaC)
+    --strategy.type=dagger     Human-in-the-loop (DAgger / RaC)
 
-Usage examples::
+Inference backends
+------------------
+    --inference.type=sync      One policy call per control tick (default)
+    --inference.type=rtc       Real-Time Chunking for slow VLA models
 
-    # Base mode (sync inference)
+Usage examples
+--------------
+::
+
+    # Base mode — quick evaluation with sync inference
     lerobot-rollout \\
         --strategy.type=base \\
         --policy.path=lerobot/act_koch_real \\
         --robot.type=koch_follower \\
+        --robot.port=/dev/ttyACM0 \\
         --task="pick up cube" --duration=30
 
-    # Base mode (RTC for slow VLAs)
+    # Base mode — RTC inference for slow VLAs (Pi0, Pi0.5, SmolVLA)
     lerobot-rollout \\
         --strategy.type=base \\
         --policy.path=lerobot/pi0_base \\
-        --inference.type=rtc --inference.rtc.execution_horizon=10 \\
+        --inference.type=rtc \\
+        --inference.rtc.execution_horizon=10 \\
+        --inference.rtc.max_guidance_weight=10.0 \\
         --robot.type=so100_follower \\
+        --robot.port=/dev/ttyACM0 \\
+        --robot.cameras="{ front: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \\
         --task="pick up cube" --duration=60
 
-    # Sentry mode (continuous recording)
+    # Sentry mode — continuous recording with periodic upload
     lerobot-rollout \\
         --strategy.type=sentry \\
         --strategy.upload_every_n_episodes=5 \\
         --policy.path=lerobot/pi0_base \\
         --inference.type=rtc \\
         --robot.type=so100_follower \\
+        --robot.port=/dev/ttyACM0 \\
         --dataset.repo_id=user/sentry-data \\
         --dataset.single_task="patrol" --duration=3600
 
-    # DAgger mode (human-in-the-loop)
+    # Highlight mode — ring buffer, press 's' to save, 'h' to push
+    lerobot-rollout \\
+        --strategy.type=highlight \\
+        --strategy.ring_buffer_seconds=30 \\
+        --policy.path=lerobot/act_koch_real \\
+        --robot.type=koch_follower \\
+        --robot.port=/dev/ttyACM0 \\
+        --dataset.repo_id=user/highlight-data \\
+        --dataset.single_task="pick up cube"
+
+    # DAgger mode — human-in-the-loop corrections only
     lerobot-rollout \\
         --strategy.type=dagger \\
+        --strategy.num_episodes=20 \\
         --policy.path=outputs/pretrain/checkpoints/last/pretrained_model \\
         --robot.type=bi_openarm_follower \\
         --teleop.type=openarm_mini \\
         --dataset.repo_id=user/hil-data \\
         --dataset.single_task="Fold the T-shirt"
+
+    # DAgger mode — continuous recording with RTC inference
+    lerobot-rollout \\
+        --strategy.type=dagger \\
+        --strategy.record_autonomous=true \\
+        --strategy.num_episodes=50 \\
+        --inference.type=rtc \\
+        --inference.rtc.execution_horizon=10 \\
+        --policy.path=user/my_pi0_policy \\
+        --robot.type=so100_follower \\
+        --robot.port=/dev/ttyACM0 \\
+        --teleop.type=so101_leader \\
+        --teleop.port=/dev/ttyACM1 \\
+        --dataset.repo_id=user/dagger-rtc-data \\
+        --dataset.single_task="Grasp the block"
+
+    # With Rerun visualization and torch.compile
+    lerobot-rollout \\
+        --strategy.type=base \\
+        --policy.path=lerobot/act_koch_real \\
+        --robot.type=koch_follower \\
+        --robot.port=/dev/ttyACM0 \\
+        --task="pick up cube" --duration=60 \\
+        --display_data=true \\
+        --use_torch_compile=true
+
+    # Resume a previous sentry recording session
+    lerobot-rollout \\
+        --strategy.type=sentry \\
+        --policy.path=user/my_policy \\
+        --robot.type=so100_follower \\
+        --robot.port=/dev/ttyACM0 \\
+        --dataset.repo_id=user/sentry-data \\
+        --dataset.single_task="patrol" \\
+        --resume=true
 """
 
 import logging

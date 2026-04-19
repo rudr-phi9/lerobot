@@ -52,10 +52,12 @@ class RolloutStrategy(abc.ABC):
         self._warmup_flushed: bool = False
 
     def _init_engine(self, ctx: RolloutContext) -> None:
-        """Attach the inference engine + interpolator and start the backend.
+        """Attach the inference engine and action interpolator, then start the backend.
 
-        Call this from ``setup()`` so strategies share identical setup
-        without duplicating code.
+        Creates an :class:`ActionInterpolator` from the config's
+        ``interpolation_multiplier`` and starts the inference engine.
+        Call this from ``setup()`` so strategies share identical
+        initialisation without duplicating code.
         """
         self._interpolator = ActionInterpolator(multiplier=ctx.runtime.cfg.interpolation_multiplier)
         self._engine = ctx.policy.inference

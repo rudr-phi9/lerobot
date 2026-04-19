@@ -175,8 +175,8 @@ def _teleop_smooth_move_to(
 ) -> None:
     """Smoothly move teleop to target position via linear interpolation.
 
-    The teleoperator is guaranteed to have motor control methods
-    (validated at context build time).
+    Requires the teleoperator to support motor control methods
+    (``enable_torque``, ``write_goal_positions``, ``get_action``).
     """
     teleop.enable_torque()
     current = teleop.get_action()

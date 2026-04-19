@@ -111,8 +111,7 @@ lerobot-rollout --strategy.type=dagger \
     --dataset.repo_id=your-username/hil-dataset \
     --dataset.single_task="Fold the T-shirt properly" \
     --dataset.fps=30 \
-    --dataset.episode_time_s=1000 \
-    --dataset.num_episodes=50 \
+    --strategy.num_episodes=50 \
     --interpolation_multiplier=2
 ```
 
@@ -139,8 +138,7 @@ lerobot-rollout --strategy.type=dagger \
     --dataset.repo_id=your-username/hil-rtc-dataset \
     --dataset.single_task="Fold the T-shirt properly" \
     --dataset.fps=30 \
-    --dataset.episode_time_s=1000 \
-    --dataset.num_episodes=50 \
+    --strategy.num_episodes=50 \
     --interpolation_multiplier=3
 ```
 

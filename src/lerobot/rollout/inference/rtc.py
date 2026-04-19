@@ -73,7 +73,13 @@ def _reanchor_relative_rtc_prefix(
     normalizer_step: NormalizerProcessorStep | None,
     policy_device: torch.device | str,
 ) -> torch.Tensor:
-    """Convert absolute leftover actions into model-space for relative-action RTC policies."""
+    """Convert absolute leftover actions into model-space for relative-action RTC policies.
+
+    When using relative actions, the RTC prefix (previous chunk's unexecuted tail)
+    is stored in absolute coordinates. Before feeding it back to the policy, this
+    helper re-expresses those actions relative to the robot's current joint state
+    and optionally normalizes them so the policy receives correctly scaled inputs.
+    """
     state = current_state.detach().cpu()
     if state.dim() == 1:
         state = state.unsqueeze(0)

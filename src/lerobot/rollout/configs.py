@@ -211,6 +211,7 @@ class RolloutConfig:
     compile_warmup_inferences: int = 2
 
     def __post_init__(self):
+        """Validate config invariants and load the policy config from ``--policy.path``."""
         # --- Strategy-specific validation ---
         if isinstance(self.strategy, DAggerStrategyConfig) and self.teleop is None:
             raise ValueError("DAgger strategy requires --teleop.type to be set")
