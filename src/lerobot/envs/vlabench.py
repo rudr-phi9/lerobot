@@ -43,8 +43,8 @@ from .utils import _LazyAsyncVectorEnv
 logger = logging.getLogger(__name__)
 
 ACTION_DIM = 7  # pos(3) + euler(3) + gripper(1)
-ACTION_LOW = -1.0
-ACTION_HIGH = 1.0
+ACTION_LOW = np.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0.0], dtype=np.float32)
+ACTION_HIGH = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32)
 
 # Default max episode steps per task type
 DEFAULT_MAX_EPISODE_STEPS = 500
@@ -177,9 +177,7 @@ class VLABenchEnv(gym.Env):
         else:
             raise ValueError(f"Unsupported obs_type: {self.obs_type}")
 
-        self.action_space = spaces.Box(
-            low=ACTION_LOW, high=ACTION_HIGH, shape=(ACTION_DIM,), dtype=np.float32
-        )
+        self.action_space = spaces.Box(low=ACTION_LOW, high=ACTION_HIGH, dtype=np.float32)
 
     # Max attempts to rebuild the underlying env when MuJoCo throws
     # `PhysicsError` (e.g. mjWARN_BADQACC) during VLABench's 20-step
@@ -346,6 +344,19 @@ class VLABenchEnv(gym.Env):
             dtype=np.float64,
         )
 
+    @staticmethod
+    def _normalize_gripper_action(gripper: float) -> float:
+        """Normalize the scalar gripper command to VLABench's [0, 1] convention.
+
+        The native VLABench collector uses 0=open and 1=closed. Older LeRobot
+        integrations often assumed a symmetric [-1, 1] gripper channel, so we
+        preserve backward compatibility by remapping negative values from
+        [-1, 1] -> [0, 1] before clipping.
+        """
+        if gripper < 0.0:
+            gripper = 0.5 * (float(np.clip(gripper, -1.0, 1.0)) + 1.0)
+        return float(np.clip(gripper, 0.0, 1.0))
+
     def _build_ctrl_from_action(self, action: np.ndarray, ctrl_dim: int) -> np.ndarray:
         """Convert a 7D EEF action into the `ctrl_dim`-sized joint command vector.
 
@@ -367,7 +378,7 @@ class VLABenchEnv(gym.Env):
 
         pos = np.asarray(action[:3], dtype=np.float64)
         rx, ry, rz = float(action[3]), float(action[4]), float(action[5])
-        gripper = float(action[6])
+        gripper = self._normalize_gripper_action(float(action[6]))
         quat = self._euler_xyz_to_quat_wxyz(rx, ry, rz)
 
         assert self._env is not None
@@ -390,7 +401,7 @@ class VLABenchEnv(gym.Env):
 
         # Gripper: action scalar in [0, 1] (0=open, 1=closed). Map linearly to
         # finger qpos in [CLOSED, OPEN]. Franka has 2 mirrored fingers.
-        g = float(np.clip(gripper, 0.0, 1.0))
+        g = gripper
         finger_qpos = self._FRANKA_FINGER_OPEN + g * (self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN)
 
         ctrl = np.zeros(ctrl_dim, dtype=np.float64)
