@@ -56,6 +56,8 @@ class TrainPipelineConfig(HubMixin):
     # Number of workers for the dataloader.
     num_workers: int = 4
     batch_size: int = 8
+    prefetch_factor: int = 4
+    persistent_workers: bool = True
     profile_mode: str = "off"
     profile_output_dir: Path | None = None
     steps: int = 100_000
