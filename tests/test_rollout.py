@@ -80,7 +80,7 @@ def test_dagger_config_defaults():
     from lerobot.rollout import DAggerStrategyConfig
 
     cfg = DAggerStrategyConfig()
-    assert cfg.num_episodes == 10
+    assert cfg.num_episodes is None
     assert cfg.record_autonomous is False
     assert cfg.input_device == "keyboard"
 

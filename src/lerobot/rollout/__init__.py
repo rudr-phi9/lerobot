@@ -56,7 +56,6 @@ __all__ = [
     "DAggerPedalConfig",
     "DAggerStrategyConfig",
     "DatasetContext",
-    "DatasetRecordConfig",
     "HardwareContext",
     "HighlightStrategyConfig",
     "InferenceEngine",
