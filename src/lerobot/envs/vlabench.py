@@ -344,19 +344,6 @@ class VLABenchEnv(gym.Env):
             dtype=np.float64,
         )
 
-    @staticmethod
-    def _normalize_gripper_action(gripper: float) -> float:
-        """Normalize the scalar gripper command to VLABench's [0, 1] convention.
-
-        The native VLABench collector uses 0=open and 1=closed. Older LeRobot
-        integrations often assumed a symmetric [-1, 1] gripper channel, so we
-        preserve backward compatibility by remapping negative values from
-        [-1, 1] -> [0, 1] before clipping.
-        """
-        if gripper < 0.0:
-            gripper = 0.5 * (float(np.clip(gripper, -1.0, 1.0)) + 1.0)
-        return float(np.clip(gripper, 0.0, 1.0))
-
     def _build_ctrl_from_action(self, action: np.ndarray, ctrl_dim: int) -> np.ndarray:
         """Convert a 7D EEF action into the `ctrl_dim`-sized joint command vector.
 
@@ -378,7 +365,7 @@ class VLABenchEnv(gym.Env):
 
         pos = np.asarray(action[:3], dtype=np.float64)
         rx, ry, rz = float(action[3]), float(action[4]), float(action[5])
-        gripper = self._normalize_gripper_action(float(action[6]))
+        gripper = float(np.clip(action[6], 0.0, 1.0))
         quat = self._euler_xyz_to_quat_wxyz(rx, ry, rz)
 
         assert self._env is not None
@@ -401,8 +388,7 @@ class VLABenchEnv(gym.Env):
 
         # Gripper: action scalar in [0, 1] (0=open, 1=closed). Map linearly to
         # finger qpos in [CLOSED, OPEN]. Franka has 2 mirrored fingers.
-        g = gripper
-        finger_qpos = self._FRANKA_FINGER_OPEN + g * (self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN)
+        finger_qpos = self._FRANKA_FINGER_OPEN + gripper * (self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN)
 
         ctrl = np.zeros(ctrl_dim, dtype=np.float64)
         ctrl[:n_dof] = arm_qpos
