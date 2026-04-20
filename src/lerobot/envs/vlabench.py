@@ -388,7 +388,9 @@ class VLABenchEnv(gym.Env):
 
         # Gripper: action scalar in [0, 1] (0=open, 1=closed). Map linearly to
         # finger qpos in [CLOSED, OPEN]. Franka has 2 mirrored fingers.
-        finger_qpos = self._FRANKA_FINGER_OPEN + gripper * (self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN)
+        finger_qpos = self._FRANKA_FINGER_OPEN + gripper * (
+            self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN
+        )
 
         ctrl = np.zeros(ctrl_dim, dtype=np.float64)
         ctrl[:n_dof] = arm_qpos
