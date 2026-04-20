@@ -305,7 +305,7 @@ def build_rollout_context(
     if not rename_map:
         expected_visuals = {k for k, v in full_config.input_features.items() if v.type == FeatureType.VISUAL}
         provided_visuals = {
-            f"observation.{k}" for k, v in robot.observation_features.items() if isinstance(v, tuple)
+            f"observation.images.{k}" for k, v in robot.observation_features.items() if isinstance(v, tuple)
         }
         policy_subset = expected_visuals.issubset(provided_visuals)
         hw_subset = provided_visuals.issubset(expected_visuals)
