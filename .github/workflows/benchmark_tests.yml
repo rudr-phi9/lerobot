@@ -379,6 +379,10 @@ jobs:
                 --policy.device=cuda \
                 '--rename_map={\"observation.images.image\": \"observation.images.camera1\", \"observation.images.second_image\": \"observation.images.camera2\", \"observation.images.wrist_image\": \"observation.images.camera3\"}' \
                 --output_dir=/tmp/eval-artifacts
+              python scripts/ci/extract_task_descriptions.py \
+                --env vlabench \
+                --task select_fruit,select_toy,select_book,select_painting,select_drink,select_ingredient,select_billiards,select_poker,add_condiment,insert_flower \
+                --output /tmp/eval-artifacts/task_descriptions.json
             "
 
       - name: Copy VLABench artifacts from container

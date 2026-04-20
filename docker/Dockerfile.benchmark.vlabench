@@ -28,8 +28,15 @@ FROM huggingface/lerobot-gpu:latest
 # Patch: constant.py calls os.listdir on ~100 asset/obj/meshes/* dirs at import
 # time. Guard the call so missing dirs return [] instead of crashing (in case
 # the asset download is partial).
-RUN git clone --depth 1 https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
-    git clone --depth 1 https://github.com/motion-planning/rrt-algorithms.git ~/rrt-algorithms && \
+#
+# Pinned upstream SHAs for reproducible benchmark runs. Bump when you need
+# an upstream fix; don't rely on `main`/`develop` drift.
+ARG VLABENCH_SHA=cf588fe60c0c7282174fe979f5913170cfe69017
+ARG RRT_ALGORITHMS_SHA=e51d95ee489a225220d6ae2a764c4111f6ba7d85
+RUN git clone https://github.com/OpenMOSS/VLABench.git ~/VLABench && \
+    git -C ~/VLABench checkout ${VLABENCH_SHA} && \
+    git clone https://github.com/motion-planning/rrt-algorithms.git ~/rrt-algorithms && \
+    git -C ~/rrt-algorithms checkout ${RRT_ALGORITHMS_SHA} && \
     python3 -c "\
 import pathlib; \
 p = pathlib.Path.home() / 'VLABench/VLABench/configs/constant.py'; \

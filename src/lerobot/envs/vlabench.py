@@ -26,9 +26,9 @@ with long-horizon reasoning, built on MuJoCo/dm_control.
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from functools import partial
 from typing import Any
 
 import cv2
@@ -39,6 +39,8 @@ from gymnasium import spaces
 from lerobot.types import RobotObservation
 
 from .utils import _LazyAsyncVectorEnv
+
+logger = logging.getLogger(__name__)
 
 ACTION_DIM = 7  # pos(3) + euler(3) + gripper(1)
 ACTION_LOW = -1.0
@@ -122,8 +124,6 @@ class VLABenchEnv(gym.Env):
         robot: str = "franka",
         max_episode_steps: int = DEFAULT_MAX_EPISODE_STEPS,
         action_mode: str = "eef",
-        episode_index: int = 0,
-        n_envs: int = 1,
     ):
         super().__init__()
         self.task = task
@@ -133,8 +133,6 @@ class VLABenchEnv(gym.Env):
         self.robot = robot
         self._max_episode_steps = max_episode_steps
         self.action_mode = action_mode
-        self.episode_index = episode_index
-        self.n_envs = n_envs
 
         # Deferred — created on first reset() inside worker subprocess to avoid
         # inheriting stale GPU/EGL contexts when AsyncVectorEnv spawns workers.
@@ -226,11 +224,12 @@ class VLABenchEnv(gym.Env):
                 break
             except PhysicsError as exc:
                 last_exc = exc
-                print(
-                    f"[vlabench] PhysicsError on attempt {attempt}/"
-                    f"{self._ENSURE_ENV_MAX_ATTEMPTS} while building task "
-                    f"'{self.task}': {exc}. Retrying with fresh layout…",
-                    flush=True,
+                logger.warning(
+                    "PhysicsError on attempt %d/%d while building task '%s': %s. Retrying with fresh layout…",
+                    attempt,
+                    self._ENSURE_ENV_MAX_ATTEMPTS,
+                    self.task,
+                    exc,
                 )
                 np.random.seed(None)
         if self._env is None:
@@ -453,7 +452,11 @@ class VLABenchEnv(gym.Env):
             # Physics integrator diverged (e.g. mjWARN_BADQACC). Treat it as
             # a graceful failed termination rather than a hard crash — the
             # rest of the multi-task eval should still run.
-            print(f"[vlabench] PhysicsError during step on task '{self.task}': {exc}. Terminating episode.")
+            logger.warning(
+                "PhysicsError during step on task '%s': %s. Terminating episode.",
+                self.task,
+                exc,
+            )
             observation = self._get_obs()
             info = {"task": self.task, "is_success": False, "physics_error": True}
             # Drop the stale env so the next reset() rebuilds it cleanly.
@@ -495,31 +498,6 @@ class VLABenchEnv(gym.Env):
             self._env = None
 
 
-# ---- Factory helpers ---------------------------------------------------------
-
-
-def _make_env_fns(
-    *,
-    task: str,
-    n_envs: int,
-    gym_kwargs: dict[str, Any],
-) -> list[Callable[[], VLABenchEnv]]:
-    """Build n_envs factory callables for a single task."""
-
-    def _make_env(episode_index: int, **kwargs) -> VLABenchEnv:
-        return VLABenchEnv(
-            task=task,
-            episode_index=episode_index,
-            n_envs=n_envs,
-            **kwargs,
-        )
-
-    fns: list[Callable[[], VLABenchEnv]] = []
-    for episode_index in range(n_envs):
-        fns.append(partial(_make_env, episode_index, **gym_kwargs))
-    return fns
-
-
 # ---- Main API ----------------------------------------------------------------
 
 
@@ -536,7 +514,7 @@ def create_vlabench_envs(
         dict[suite_name][task_id] -> vec_env (env_cls([...]) with exactly n_envs factories)
 
     Notes:
-        - n_envs is the number of rollouts *per task* (episode_index = 0..n_envs-1).
+        - n_envs is the number of rollouts *per task*.
         - `task` can be a suite name ("primitive", "composite"), a comma-separated list of
           suite names, or individual task names (e.g. "select_fruit,heat_food").
     """
@@ -550,7 +528,11 @@ def create_vlabench_envs(
     if not task_groups:
         raise ValueError("`task` must contain at least one VLABench task or suite name.")
 
-    print(f"Creating VLABench envs | task_groups={task_groups} | n_envs(per task)={n_envs}")
+    logger.info(
+        "Creating VLABench envs | task_groups=%s | n_envs(per task)=%d",
+        task_groups,
+        n_envs,
+    )
 
     is_async = env_cls is gym.vector.AsyncVectorEnv
     cached_obs_space = None
@@ -563,13 +545,14 @@ def create_vlabench_envs(
         tasks = SUITE_TASKS.get(group, [group])
 
         for tid, task_name in enumerate(tasks):
-            print(f"Building vec env | group={group} | task_id={tid} | task={task_name}")
-
-            fns = _make_env_fns(
-                task=task_name,
-                n_envs=n_envs,
-                gym_kwargs=gym_kwargs,
+            logger.info(
+                "Building vec env | group=%s | task_id=%d | task=%s",
+                group,
+                tid,
+                task_name,
             )
+
+            fns = [(lambda tn=task_name: VLABenchEnv(task=tn, **gym_kwargs)) for _ in range(n_envs)]
 
             if is_async:
                 lazy = _LazyAsyncVectorEnv(fns, cached_obs_space, cached_act_space, cached_metadata)
