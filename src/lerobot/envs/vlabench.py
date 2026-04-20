@@ -187,8 +187,10 @@ class VLABenchEnv(gym.Env):
     # `PhysicsError` (e.g. mjWARN_BADQACC) during VLABench's 20-step
     # reset warm-up. Some random task/layout samples land in unstable
     # initial configurations; re-sampling the layout almost always
-    # gives a stable one.
-    _ENSURE_ENV_MAX_ATTEMPTS = 5
+    # gives a stable one. A handful of upstream tasks (notably
+    # `select_mahjong`) have layout samplers that diverge often enough
+    # to need >>5 retries, so we pick a generous ceiling.
+    _ENSURE_ENV_MAX_ATTEMPTS = 20
 
     def _ensure_env(self) -> None:
         """Create the underlying VLABench env on first use.
@@ -201,7 +203,11 @@ class VLABenchEnv(gym.Env):
         warm-up `step()` calls while toggling gravity/fluids to let the scene
         settle; for some random layouts MuJoCo's integrator diverges and
         raises `mjWARN_BADQACC`. Re-sampling the layout almost always yields
-        a stable one, so we retry a few times before giving up.
+        a stable one, so we retry a number of times before giving up. Between
+        attempts we reseed NumPy's global RNG from OS entropy so the upstream
+        task sampler explores fresh initial states — without this, retries
+        can replay the same diverging configuration when the sampler is
+        deterministic given the current RNG state.
         """
         if self._env is not None:
             return
@@ -223,11 +229,19 @@ class VLABenchEnv(gym.Env):
                 print(
                     f"[vlabench] PhysicsError on attempt {attempt}/"
                     f"{self._ENSURE_ENV_MAX_ATTEMPTS} while building task "
-                    f"'{self.task}': {exc}. Retrying with fresh layout…"
+                    f"'{self.task}': {exc}. Retrying with fresh layout…",
+                    flush=True,
                 )
+                np.random.seed(None)
         if self._env is None:
             assert last_exc is not None
-            raise last_exc
+            raise RuntimeError(
+                f"VLABench task '{self.task}' failed to produce a stable "
+                f"initial layout after {self._ENSURE_ENV_MAX_ATTEMPTS} "
+                f"attempts. This task's upstream sampler diverges too "
+                f"often for the configured robot; consider removing it "
+                f"from the eval set. Last physics error: {last_exc}"
+            ) from last_exc
 
         # Extract task description from the dm_control task
         task_obj = self._env.task
@@ -541,6 +555,7 @@ def create_vlabench_envs(
     is_async = env_cls is gym.vector.AsyncVectorEnv
     cached_obs_space = None
     cached_act_space = None
+    cached_metadata = None
     out: dict[str, dict[int, Any]] = defaultdict(dict)
 
     for group in task_groups:
@@ -557,10 +572,11 @@ def create_vlabench_envs(
             )
 
             if is_async:
-                lazy = _LazyAsyncVectorEnv(fns, cached_obs_space, cached_act_space)
+                lazy = _LazyAsyncVectorEnv(fns, cached_obs_space, cached_act_space, cached_metadata)
                 if cached_obs_space is None:
                     cached_obs_space = lazy.observation_space
                     cached_act_space = lazy.action_space
+                    cached_metadata = lazy.metadata
                 out[group][tid] = lazy
             else:
                 out[group][tid] = env_cls(fns)

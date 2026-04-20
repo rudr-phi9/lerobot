@@ -372,7 +372,7 @@ jobs:
               lerobot-eval \
                 --policy.path=lerobot/smolvla_vlabench \
                 --env.type=vlabench \
-                --env.task=select_fruit,select_toy,select_book,select_painting,select_drink,select_ingredient,select_mahjong,select_poker,add_condiment,insert_flower \
+                --env.task=select_fruit,select_toy,select_book,select_painting,select_drink,select_ingredient,select_billiards,select_poker,add_condiment,insert_flower \
                 --eval.batch_size=1 \
                 --eval.n_episodes=1 \
                 --eval.use_async_envs=false \
@@ -394,7 +394,7 @@ jobs:
           python3 scripts/ci/parse_eval_metrics.py \
             --artifacts-dir /tmp/vlabench-artifacts \
             --env vlabench \
-            --task select_fruit,select_toy,select_book,select_painting,select_drink,select_ingredient,select_mahjong,select_poker,add_condiment,insert_flower \
+            --task select_fruit,select_toy,select_book,select_painting,select_drink,select_ingredient,select_billiards,select_poker,add_condiment,insert_flower \
             --policy lerobot/smolvla_vlabench
 
       - name: Upload VLABench rollout video
