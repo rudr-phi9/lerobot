@@ -1,6 +1,6 @@
 # VLABench
 
-[VLABench](https://github.com/OpenMOSS/VLABench) is a large-scale benchmark for **language-conditioned robotic manipulation with long-horizon reasoning**. It covers 100 task categories across 2,000+ objects and evaluates six dimensions of robot intelligence: mesh & texture understanding, spatial reasoning, world-knowledge transfer, semantic instruction comprehension, physical-law understanding, and long-horizon planning. Built on MuJoCo / dm_control with a Franka Panda 7-DOF arm.
+[VLABench](https://github.com/OpenMOSS/VLABench) is a large-scale benchmark for **language-conditioned robotic manipulation with long-horizon reasoning**. The upstream suite covers 100 task categories across 2,000+ objects and evaluates six dimensions of robot intelligence: mesh & texture understanding, spatial reasoning, world-knowledge transfer, semantic instruction comprehension, physical-law understanding, and long-horizon planning. Built on MuJoCo / dm_control with a Franka Panda 7-DOF arm. LeRobot exposes **43 of these tasks** through `--env.task` (21 primitives + 22 composites, see [Available tasks](#available-tasks) below).
 
 - Paper: [VLABench: A Large-Scale Benchmark for Language-Conditioned Robotics Manipulation with Long-Horizon Reasoning](https://arxiv.org/abs/2412.18194)
 - GitHub: [OpenMOSS/VLABench](https://github.com/OpenMOSS/VLABench)
@@ -53,6 +53,8 @@ export MUJOCO_GL=egl  # for headless servers (HPC, cloud)
 
 ## Evaluation
 
+All eval snippets below mirror the command CI runs (see `.github/workflows/benchmark_tests.yml`). The `--rename_map` argument maps VLABench's `image` / `second_image` / `wrist_image` camera keys onto the three-camera (`camera1` / `camera2` / `camera3`) input layout the released `smolvla_vlabench` policy was trained on.
+
 ### Single-task evaluation (recommended for quick iteration)
 
 ```bash
@@ -61,7 +63,10 @@ lerobot-eval \
   --env.type=vlabench \
   --env.task=select_fruit \
   --eval.batch_size=1 \
-  --eval.n_episodes=10
+  --eval.n_episodes=10 \
+  --eval.use_async_envs=false \
+  --policy.device=cuda \
+  '--rename_map={"observation.images.image": "observation.images.camera1", "observation.images.second_image": "observation.images.camera2", "observation.images.wrist_image": "observation.images.camera3"}'
 ```
 
 ### Multi-task evaluation
@@ -74,7 +79,10 @@ lerobot-eval \
   --env.type=vlabench \
   --env.task=select_fruit,select_toy,add_condiment,heat_food \
   --eval.batch_size=1 \
-  --eval.n_episodes=10
+  --eval.n_episodes=10 \
+  --eval.use_async_envs=false \
+  --policy.device=cuda \
+  '--rename_map={"observation.images.image": "observation.images.camera1", "observation.images.second_image": "observation.images.camera2", "observation.images.wrist_image": "observation.images.camera3"}'
 ```
 
 ### Suite-wide evaluation
@@ -88,7 +96,10 @@ lerobot-eval \
   --env.task=primitive \
   --eval.batch_size=1 \
   --eval.n_episodes=10 \
-  --env.max_parallel_tasks=1
+  --eval.use_async_envs=false \
+  --policy.device=cuda \
+  --env.max_parallel_tasks=1 \
+  '--rename_map={"observation.images.image": "observation.images.camera1", "observation.images.second_image": "observation.images.camera2", "observation.images.wrist_image": "observation.images.camera3"}'
 ```
 
 Or both suites:
@@ -100,7 +111,10 @@ lerobot-eval \
   --env.task=primitive,composite \
   --eval.batch_size=1 \
   --eval.n_episodes=10 \
-  --env.max_parallel_tasks=1
+  --eval.use_async_envs=false \
+  --policy.device=cuda \
+  --env.max_parallel_tasks=1 \
+  '--rename_map={"observation.images.image": "observation.images.camera1", "observation.images.second_image": "observation.images.camera2", "observation.images.wrist_image": "observation.images.camera3"}'
 ```
 
 ### Recommended evaluation episodes

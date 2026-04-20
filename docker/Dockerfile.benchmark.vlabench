@@ -68,9 +68,8 @@ p = snapshot_download(repo_id='${VLABENCH_ASSETS_REPO}', repo_type='dataset', \
     local_dir='${ASSETS_DIR}', allow_patterns=['obj/**', 'scenes/**']); \
 print('snapshot_download returned:', p)"; \
     else \
-        echo "No VLABENCH_ASSETS_REPO set — falling back to gdown (best-effort)" && \
-        python ~/VLABench/scripts/download_assets.py --choice all || \
-          echo "WARN: VLABench asset download failed (likely Google Drive quota)."; \
+        echo "No VLABENCH_ASSETS_REPO set — falling back to gdown" && \
+        python ~/VLABench/scripts/download_assets.py --choice all; \
     fi && \
     python -c "\
 from pathlib import Path; \

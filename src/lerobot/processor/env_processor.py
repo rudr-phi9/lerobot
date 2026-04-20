@@ -154,35 +154,6 @@ class LiberoProcessorStep(ObservationProcessorStep):
 
 
 @dataclass
-@ProcessorStepRegistry.register(name="vlabench_processor")
-class VLABenchProcessorStep(ObservationProcessorStep):
-    """
-    Processes VLABench observations into the LeRobot format.
-
-    VLABench returns end-effector state as a 7-dim vector:
-    [pos_x, pos_y, pos_z, euler_x, euler_y, euler_z, gripper].
-    This is already in the format expected by the datasets, so we pass it
-    through as observation.state with no additional conversion.
-
-    Images are passed through without transformation (VLABench cameras
-    are already oriented correctly).
-    """
-
-    def _process_observation(self, observation):
-        """Processes observations from VLABench — minimal transform needed."""
-        return observation.copy()
-
-    def transform_features(
-        self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
-    ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
-        """VLABench state is already in the expected format."""
-        return features
-
-    def observation(self, observation):
-        return self._process_observation(observation)
-
-
-@dataclass
 @ProcessorStepRegistry.register(name="isaaclab_arena_processor")
 class IsaaclabArenaProcessorStep(ObservationProcessorStep):
     """

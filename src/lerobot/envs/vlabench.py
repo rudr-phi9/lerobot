@@ -31,6 +31,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Any
 
+import cv2
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -246,8 +247,6 @@ class VLABenchEnv(gym.Env):
 
         def _to_hwc3(arr: np.ndarray) -> np.ndarray:
             """Coerce any camera array to the declared (h, w, 3) uint8 shape."""
-            import cv2
-
             a = np.asarray(arr)
             # Drop a leading singleton batch dim if present.
             while a.ndim > 3 and a.shape[0] == 1:
@@ -392,11 +391,27 @@ class VLABenchEnv(gym.Env):
         assert self._env is not None
         super().reset(seed=seed)
 
+        if seed is not None:
+            self._seed_inner_env(int(self.np_random.integers(0, 2**31 - 1)))
+
         self._env.reset()
 
         observation = self._get_obs()
         info = {"is_success": False}
         return observation, info
+
+    def _seed_inner_env(self, seed: int) -> None:
+        """Propagate `seed` to the inner dm_control env. `Environment.reset()`
+        doesn't accept a seed, so we re-seed the task and environment
+        `RandomState`s directly. Best-effort: silently skipped when the
+        expected attributes are absent on a given VLABench version.
+        """
+        for owner_attr, rng_attr in (("task", "random"), (None, "_random_state")):
+            owner = getattr(self._env, owner_attr) if owner_attr else self._env
+            rng = getattr(owner, rng_attr, None)
+            rng_seed = getattr(rng, "seed", None)
+            if callable(rng_seed):
+                rng_seed(seed)
 
     def step(self, action: np.ndarray) -> tuple[RobotObservation, float, bool, bool, dict[str, Any]]:
         from dm_control.rl.control import PhysicsError  # type: ignore[import-untyped]

@@ -560,14 +560,6 @@ class VLABenchEnv(EnvConfig):
             env_cls=env_cls,
         )
 
-    def get_env_processors(self):
-        from lerobot.processor.env_processor import VLABenchProcessorStep
-
-        return (
-            PolicyProcessorPipeline(steps=[VLABenchProcessorStep()]),
-            PolicyProcessorPipeline(steps=[]),
-        )
-
 
 @EnvConfig.register_subclass("isaaclab_arena")
 @dataclass
