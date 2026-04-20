@@ -272,11 +272,17 @@ def build_rollout_context(
     #         )
 
     # --- 4. Features + action-key reconciliation ---------------------
+    # Only `.pos` joint features are used for policy inference — velocity and
+    # torque channels are observation-only and must be excluded from the state
+    # and action tensors that the policy sees.  This matches the filtering
+    # applied by the old ``hil_data_collection`` script.
     all_obs_features = robot.observation_features
     observation_features_hw = {
-        k: v for k, v in all_obs_features.items() if v is float or isinstance(v, tuple)
+        k: v
+        for k, v in all_obs_features.items()
+        if isinstance(v, tuple) or (v is float and k.endswith(".pos"))
     }
-    action_features_hw = robot.action_features
+    action_features_hw = {k: v for k, v in robot.action_features.items() if k.endswith(".pos")}
 
     # The action side is always needed: sync inference reads action names from
     # ``dataset_features[ACTION]`` to map policy tensors back to robot actions.
@@ -293,12 +299,49 @@ def build_rollout_context(
     )
     dataset_features = combine_feature_dicts(action_dataset_features, observation_dataset_features)
     hw_features = hw_to_dataset_features(observation_features_hw, "observation")
-    raw_action_keys = list(robot.action_features.keys())
+    raw_action_keys = list(action_features_hw.keys())
     policy_action_names = getattr(policy_config, "action_feature_names", None)
     ordered_action_keys = _resolve_action_key_order(
         list(policy_action_names) if policy_action_names else None,
         raw_action_keys,
     )
+
+    # --- Diagnostic logging ---
+    _act_ft = dataset_features.get("action", {})
+    _obs_ft = dataset_features.get("observation.state", {})
+    logger.info(
+        "Feature reconciliation: action_dim=%d, obs_state_dim=%d, ordered_action_keys=%d",
+        _act_ft.get("shape", (0,))[0],
+        _obs_ft.get("shape", (0,))[0],
+        len(ordered_action_keys),
+    )
+    logger.info("  action names  : %s", _act_ft.get("names", []))
+    logger.info("  obs state names: %s", _obs_ft.get("names", []))
+    logger.info("  ordered keys   : %s", ordered_action_keys)
+    logger.info(
+        "  policy.action_feature_names: %s",
+        list(policy_action_names) if policy_action_names else "None (using raw_action_keys)",
+    )
+    if full_config.input_features:
+        logger.info("  policy input_features: %s", list(full_config.input_features.keys()))
+    else:
+        logger.warning("  policy input_features is EMPTY — policy may not process images!")
+    if full_config.output_features:
+        for k, v in full_config.output_features.items():
+            logger.info("  policy output_features[%s]: shape=%s", k, v.shape)
+    # Validate action dimension consistency
+    if full_config.output_features:
+        for ft in full_config.output_features.values():
+            policy_action_dim = ft.shape[0]
+            if len(ordered_action_keys) != policy_action_dim:
+                logger.error(
+                    "ACTION DIM MISMATCH: policy expects %d dims, hardware produces %d keys. "
+                    "First 5 keys: %s",
+                    policy_action_dim,
+                    len(ordered_action_keys),
+                    ordered_action_keys[:5],
+                )
+            break
 
     # Validate visual features if no rename_map is active
     rename_map = cfg.dataset.rename_map if cfg.dataset else {}

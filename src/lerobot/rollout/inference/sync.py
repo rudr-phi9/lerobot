@@ -97,9 +97,29 @@ class SyncInferenceEngine(InferenceEngine):
                 observation, self._device, self._task, self._robot_type
             )
             observation = self._preprocessor(observation)
-            action = self._policy.select_action(observation)
-            action = self._postprocessor(action)
+            action_raw = self._policy.select_action(observation)
+            action = self._postprocessor(action_raw)
         action_tensor = action.squeeze(0).cpu()
+
+        if not hasattr(self, "_log_count"):
+            self._log_count = 0
+        if self._log_count < 3:
+            raw_flat = action_raw.squeeze(0).cpu()
+            logger.info(
+                "[Sync tick %d] raw action (first 5): %s | post-processed (first 5): %s",
+                self._log_count,
+                raw_flat[:5].tolist(),
+                action_tensor[:5].tolist(),
+            )
+            obs_state = obs_frame.get("observation.state")
+            if obs_state is not None:
+                logger.info(
+                    "[Sync tick %d] obs_frame['observation.state'] (first 5): %s | shape: %s",
+                    self._log_count,
+                    obs_state[:5].tolist() if hasattr(obs_state, "tolist") else str(obs_state)[:80],
+                    obs_state.shape if hasattr(obs_state, "shape") else "?",
+                )
+            self._log_count += 1
 
         # Reorder to match dataset action ordering so the caller can treat
         # the returned tensor uniformly across backends.

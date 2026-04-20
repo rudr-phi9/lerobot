@@ -268,5 +268,17 @@ def send_next_action(
 
     action_dict = {k: interp[i].item() for i, k in enumerate(ordered_keys) if i < len(interp)}
     processed = ctx.processors.robot_action_processor((action_dict, obs_raw))
+
+    if not hasattr(send_next_action, "_log_count"):
+        send_next_action._log_count = 0
+    if send_next_action._log_count < 3:
+        sample = {k: round(v, 4) for k, v in list(processed.items())[:5]}
+        logger.info(
+            "[send_next_action tick %d] action sent to robot (first 5): %s",
+            send_next_action._log_count,
+            sample,
+        )
+        send_next_action._log_count += 1
+
     ctx.hardware.robot_wrapper.send_action(processed)
     return action_dict
