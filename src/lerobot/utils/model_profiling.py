@@ -328,7 +328,15 @@ def write_deterministic_forward_artifacts(
     if len(dataset) == 0:
         raise ValueError("Cannot build a reference batch from an empty dataset.")
     indices = [i % len(dataset) for i in range(batch_size)]
-    reference_batch = preprocessor(default_collate([dataset[i] for i in indices]))
+    reference_batch = default_collate([dataset[i] for i in indices])
+    # Mirror the uint8 → float32/255 conversion the train loop applies after
+    # the dataloader (PR #3406). The dataset ships camera frames as uint8 for
+    # faster transport, but policies like SmolVLA/xVLA run bilinear
+    # interpolation on images which doesn't support Byte tensors.
+    for cam_key in dataset.meta.camera_keys:
+        if cam_key in reference_batch and reference_batch[cam_key].dtype == torch.uint8:
+            reference_batch[cam_key] = reference_batch[cam_key].to(dtype=torch.float32) / 255.0
+    reference_batch = preprocessor(reference_batch)
 
     activities = [torch.profiler.ProfilerActivity.CPU]
     if device_type == "cuda":
