@@ -193,8 +193,8 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
 
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         # Accelerate auto-detects the device based on the available hardware and ignores the policy.device setting.
-        # Force the device to be CPU when policy.device is set to CPU.
-        force_cpu = cfg.policy.device == "cpu"
+        # Force the device to be CPU when the active config's device is set to CPU (works for both policy and reward model training).
+        force_cpu = cfg.trainable_config.device == "cpu"
         accelerator = Accelerator(
             step_scheduler_with_optimizer=False,
             kwargs_handlers=[ddp_kwargs],
@@ -295,7 +295,7 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
     if (processor_pretrained_path and not cfg.resume) or not processor_pretrained_path:
         processor_kwargs["dataset_stats"] = dataset.meta.stats
 
-    if cfg.is_reward_model_training and cfg.reward_model.type == "sarm":
+    if cfg.is_reward_model_training:
         processor_kwargs["dataset_meta"] = dataset.meta
 
     if not cfg.is_reward_model_training and processor_pretrained_path is not None:
@@ -376,13 +376,13 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
     # create dataloader for offline training
-    if hasattr(cfg.policy, "drop_n_last_frames"):
+    if hasattr(active_cfg, "drop_n_last_frames"):
         shuffle = False
         sampler = EpisodeAwareSampler(
             dataset.meta.episodes["dataset_from_index"],
             dataset.meta.episodes["dataset_to_index"],
             episode_indices_to_use=dataset.episodes,
-            drop_n_last_frames=cfg.policy.drop_n_last_frames,
+            drop_n_last_frames=active_cfg.drop_n_last_frames,
             shuffle=True,
         )
     else:
@@ -559,14 +559,15 @@ def train(cfg: TrainPipelineConfig, accelerator: "Accelerator | None" = None):
     if is_main_process:
         logging.info("End of training")
 
-        if cfg.policy.push_to_hub:
-            unwrapped_policy = accelerator.unwrap_model(policy)
-            if cfg.policy.use_peft:
-                unwrapped_policy.push_model_to_hub(cfg, peft_model=unwrapped_policy)
+        if getattr(active_cfg, "push_to_hub", False):
+            unwrapped_model = accelerator.unwrap_model(policy)
+            # PEFT only applies when training a policy — reward models use the plain path.
+            if not cfg.is_reward_model_training and cfg.policy.use_peft:
+                unwrapped_model.push_model_to_hub(cfg, peft_model=unwrapped_model)
             else:
-                unwrapped_policy.push_model_to_hub(cfg)
-            preprocessor.push_to_hub(cfg.policy.repo_id)
-            postprocessor.push_to_hub(cfg.policy.repo_id)
+                unwrapped_model.push_model_to_hub(cfg)
+            preprocessor.push_to_hub(active_cfg.repo_id)
+            postprocessor.push_to_hub(active_cfg.repo_id)
 
     # Properly clean up the distributed process group
     accelerator.wait_for_everyone()
