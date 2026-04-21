@@ -47,6 +47,7 @@ class BiSOFollower(Robot):
             max_relative_target=config.left_arm_config.max_relative_target,
             use_degrees=config.left_arm_config.use_degrees,
             cameras=config.left_arm_config.cameras,
+            auto_apply_calibration=config.left_arm_config.auto_apply_calibration,
         )
 
         right_arm_config = SOFollowerRobotConfig(
@@ -57,6 +58,7 @@ class BiSOFollower(Robot):
             max_relative_target=config.right_arm_config.max_relative_target,
             use_degrees=config.right_arm_config.use_degrees,
             cameras=config.right_arm_config.cameras,
+            auto_apply_calibration=config.right_arm_config.auto_apply_calibration,
         )
 
         self.left_arm = SOFollower(left_arm_config)
