@@ -15,11 +15,9 @@
 from __future__ import annotations
 
 import abc
-from typing import Any
 
+from lerobot.rl.algorithms.base import BatchType
 from lerobot.rl.buffer import ReplayBuffer, concatenate_batch_transitions
-
-BatchType = dict[str, Any]
 
 
 class DataMixer(abc.ABC):
