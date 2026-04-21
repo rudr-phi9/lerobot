@@ -101,7 +101,7 @@ class SACAlgorithm(RLAlgorithm):
             self.policy.discrete_critic = self.discrete_critic
 
     def _init_discrete_critics(self, encoder: SACObservationEncoder) -> tuple[DiscreteCritic, DiscreteCritic]:
-        """Build discrete discrete critic ensemble and target networks."""
+        """Build discrete critic ensemble and target networks."""
         discrete_critic = DiscreteCritic(
             encoder=encoder,
             input_dim=encoder.output_dim,
