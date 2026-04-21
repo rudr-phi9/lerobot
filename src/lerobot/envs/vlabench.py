@@ -35,7 +35,7 @@ import cv2
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation
 
 from lerobot.types import RobotObservation
 
@@ -260,9 +260,9 @@ class VLABenchEnv(gym.Env):
         # `_get_obs` can translate between robot-frame (dataset) and
         # world-frame (dm_control) without hitting physics every call.
         try:
-            self._robot_base_xyz = np.asarray(
-                self._env.get_robot_frame_position(), dtype=np.float64
-            ).reshape(3)
+            self._robot_base_xyz = np.asarray(self._env.get_robot_frame_position(), dtype=np.float64).reshape(
+                3
+            )
         except Exception:
             # Fallback to VLABench's default Franka base position.
             self._robot_base_xyz = np.array([0.0, -0.4, 0.78], dtype=np.float64)
@@ -323,20 +323,14 @@ class VLABenchEnv(gym.Env):
         # 'xyz' euler angles.
         raw = np.asarray(obs.get("ee_state", np.zeros(8)), dtype=np.float64).ravel()
         pos_world = raw[:3] if raw.size >= 3 else np.zeros(3, dtype=np.float64)
-        quat_wxyz = (
-            raw[3:7] if raw.size >= 7 else np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-        )
+        quat_wxyz = raw[3:7] if raw.size >= 7 else np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         gripper = float(raw[7]) if raw.size >= 8 else 0.0
 
-        base = (
-            self._robot_base_xyz
-            if self._robot_base_xyz is not None
-            else np.zeros(3, dtype=np.float64)
-        )
+        base = self._robot_base_xyz if self._robot_base_xyz is not None else np.zeros(3, dtype=np.float64)
         pos_robot = pos_world - base
-        euler_xyz = R.from_quat(
-            [quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]]
-        ).as_euler("xyz", degrees=False)
+        euler_xyz = Rotation.from_quat([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]]).as_euler(
+            "xyz", degrees=False
+        )
 
         ee_state = np.concatenate([pos_robot, euler_xyz, [gripper]]).astype(np.float64)
 
@@ -387,11 +381,7 @@ class VLABenchEnv(gym.Env):
 
         # Action position is in robot-base frame (see convert_to_lerobot.py);
         # dm_control's IK expects a world-frame target.
-        base = (
-            self._robot_base_xyz
-            if self._robot_base_xyz is not None
-            else np.zeros(3, dtype=np.float64)
-        )
+        base = self._robot_base_xyz if self._robot_base_xyz is not None else np.zeros(3, dtype=np.float64)
         pos_world = np.asarray(action[:3], dtype=np.float64) + base
         rx, ry, rz = float(action[3]), float(action[4]), float(action[5])
         gripper = float(np.clip(action[6], 0.0, 1.0))
@@ -399,7 +389,7 @@ class VLABenchEnv(gym.Env):
         # Dataset euler is scipy extrinsic 'xyz' (same as VLABench's
         # `euler_to_quaternion`). scipy emits `[x, y, z, w]`; dm_control's IK
         # and MuJoCo use `[w, x, y, z]`, so reorder.
-        qxyzw = R.from_euler("xyz", [rx, ry, rz], degrees=False).as_quat()
+        qxyzw = Rotation.from_euler("xyz", [rx, ry, rz], degrees=False).as_quat()
         quat = np.array([qxyzw[3], qxyzw[0], qxyzw[1], qxyzw[2]], dtype=np.float64)
 
         assert self._env is not None
