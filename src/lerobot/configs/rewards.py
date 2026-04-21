@@ -123,13 +123,13 @@ class RewardModelConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
                     f"{CONFIG_NAME} not found on the HuggingFace Hub in {model_id}"
                 ) from e
 
+        if config_file is None:
+            raise FileNotFoundError(f"{CONFIG_NAME} not found in {model_id}")
+
         # HACK: Parse the original config to get the config subclass, so that we can
         # apply cli overrides.
         with draccus.config_type("json"):
             orig_config = draccus.parse(cls, config_file, args=[])
-
-        if config_file is None:
-            raise FileNotFoundError(f"{CONFIG_NAME} not found in {model_id}")
 
         with open(config_file) as f:
             config = json.load(f)
