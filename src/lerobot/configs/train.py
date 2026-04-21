@@ -164,8 +164,8 @@ class TrainPipelineConfig(HubMixin):
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
-        """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
-        return ["policy"]
+        """Keys for draccus pretrained-path loading."""
+        return ["policy", "reward_model"]
 
     def to_dict(self) -> dict[str, Any]:
         return draccus.encode(self)  # type: ignore[no-any-return]  # because of the third-party library draccus uses Any as the return type
