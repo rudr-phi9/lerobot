@@ -35,6 +35,7 @@ import cv2
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from scipy.spatial.transform import Rotation as R
 
 from lerobot.types import RobotObservation
 
@@ -141,6 +142,12 @@ class VLABenchEnv(gym.Env):
         # refetch it via `self._env.physics` at the call site.
         self._env = None
         self.task_description = ""  # populated on first reset
+        # Cached world-frame XYZ of the robot base link. The VLABench datasets
+        # log both `observation.state` positions and `actions` positions in
+        # robot-base frame (see VLABench/scripts/convert_to_lerobot.py which
+        # subtracts `robot_frame_pos` from ee_pos). The robot is attached at a
+        # fixed offset per task so this is safe to cache once per env build.
+        self._robot_base_xyz: np.ndarray | None = None
 
         h, w = self.render_resolution
 
@@ -249,6 +256,17 @@ class VLABenchEnv(gym.Env):
         else:
             self.task_description = self.task
 
+        # Cache robot base world position so `_build_ctrl_from_action` and
+        # `_get_obs` can translate between robot-frame (dataset) and
+        # world-frame (dm_control) without hitting physics every call.
+        try:
+            self._robot_base_xyz = np.asarray(
+                self._env.get_robot_frame_position(), dtype=np.float64
+            ).reshape(3)
+        except Exception:
+            # Fallback to VLABench's default Franka base position.
+            self._robot_base_xyz = np.array([0.0, -0.4, 0.78], dtype=np.float64)
+
     def _get_obs(self) -> dict:
         """Get current observation from the environment."""
         assert self._env is not None
@@ -298,14 +316,29 @@ class VLABenchEnv(gym.Env):
             else:
                 images[key] = np.zeros((h, w, 3), dtype=np.uint8)
 
-        # Extract end-effector state — coerce to exactly (7,) so vector env concat
-        # doesn't fail with shape-mismatch on buffer np.stack.
-        ee_state = obs.get("ee_state", np.zeros(7, dtype=np.float64))
-        ee_state = np.asarray(ee_state, dtype=np.float64).ravel()
-        if ee_state.shape[0] != 7:
-            fixed = np.zeros(7, dtype=np.float64)
-            fixed[: min(7, ee_state.shape[0])] = ee_state[:7]
-            ee_state = fixed
+        # Convert VLABench's raw ee_state `[pos_world(3), quat_wxyz(4), open(1)]`
+        # to the dataset's observation.state layout `[pos_robot(3), euler_xyz(3),
+        # gripper(1)]`. See VLABench/scripts/convert_to_lerobot.py — positions
+        # are stored in robot-base frame and orientations as scipy extrinsic
+        # 'xyz' euler angles.
+        raw = np.asarray(obs.get("ee_state", np.zeros(8)), dtype=np.float64).ravel()
+        pos_world = raw[:3] if raw.size >= 3 else np.zeros(3, dtype=np.float64)
+        quat_wxyz = (
+            raw[3:7] if raw.size >= 7 else np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+        )
+        gripper = float(raw[7]) if raw.size >= 8 else 0.0
+
+        base = (
+            self._robot_base_xyz
+            if self._robot_base_xyz is not None
+            else np.zeros(3, dtype=np.float64)
+        )
+        pos_robot = pos_world - base
+        euler_xyz = R.from_quat(
+            [quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]]
+        ).as_euler("xyz", degrees=False)
+
+        ee_state = np.concatenate([pos_robot, euler_xyz, [gripper]]).astype(np.float64)
 
         if self.obs_type == "pixels":
             return {"pixels": images}
@@ -319,30 +352,19 @@ class VLABenchEnv(gym.Env):
 
     # ---- Action adaptation (EEF → joint ctrl) --------------------------------
     #
-    # The dataset logs 7D actions [x, y, z, rx, ry, rz, gripper] in end-effector
-    # space, but VLABench's dm_control task writes `data.ctrl[:] = action`
-    # directly — which for Franka expects 9 entries (7 arm joints + 2 gripper
-    # fingers). Reproduce the same EEF-to-joint conversion that VLABench's data
-    # collector uses (`SingleArm.get_qpos_from_ee_pos`, a dm_control IK solver)
-    # so the policy's EEF commands actually drive the robot at eval time.
+    # The HF vlabench datasets log 7D actions
+    # `[x, y, z (robot frame), rx, ry, rz (scipy extrinsic xyz), gripper]`,
+    # exactly matching VLABench's own eval pipeline (evaluator.base):
+    #   pos, euler, g = policy(...)
+    #   quat = euler_to_quaternion(*euler)      # extrinsic xyz -> wxyz
+    #   _, qpos = robot.get_qpos_from_ee_pos(physics, pos=pos + base, quat=quat)
+    #   env.step(np.concatenate([qpos, [g, g]]))
+    #
+    # VLABench's dm_control task writes `data.ctrl[:] = action` directly — for
+    # Franka that's 9 entries (7 arm joints + 2 gripper fingers). We mirror the
+    # above conversion so the policy's EEF commands actually drive the robot.
 
     _FRANKA_FINGER_OPEN = 0.04  # qpos when gripper fully open
-    _FRANKA_FINGER_CLOSED = 0.0
-
-    @staticmethod
-    def _euler_xyz_to_quat_wxyz(rx: float, ry: float, rz: float) -> np.ndarray:
-        """Euler (XYZ intrinsic) → quaternion (w, x, y, z) — dm_control convention."""
-        cx, cy, cz = np.cos(0.5 * np.array([rx, ry, rz]))
-        sx, sy, sz = np.sin(0.5 * np.array([rx, ry, rz]))
-        return np.array(
-            [
-                cx * cy * cz + sx * sy * sz,
-                sx * cy * cz - cx * sy * sz,
-                cx * sy * cz + sx * cy * sz,
-                cx * cy * sz - sx * sy * cz,
-            ],
-            dtype=np.float64,
-        )
 
     def _build_ctrl_from_action(self, action: np.ndarray, ctrl_dim: int) -> np.ndarray:
         """Convert a 7D EEF action into the `ctrl_dim`-sized joint command vector.
@@ -363,22 +385,34 @@ class VLABenchEnv(gym.Env):
 
         from dm_control.utils.inverse_kinematics import qpos_from_site_pose
 
-        pos = np.asarray(action[:3], dtype=np.float64)
+        # Action position is in robot-base frame (see convert_to_lerobot.py);
+        # dm_control's IK expects a world-frame target.
+        base = (
+            self._robot_base_xyz
+            if self._robot_base_xyz is not None
+            else np.zeros(3, dtype=np.float64)
+        )
+        pos_world = np.asarray(action[:3], dtype=np.float64) + base
         rx, ry, rz = float(action[3]), float(action[4]), float(action[5])
         gripper = float(np.clip(action[6], 0.0, 1.0))
-        quat = self._euler_xyz_to_quat_wxyz(rx, ry, rz)
+
+        # Dataset euler is scipy extrinsic 'xyz' (same as VLABench's
+        # `euler_to_quaternion`). scipy emits `[x, y, z, w]`; dm_control's IK
+        # and MuJoCo use `[w, x, y, z]`, so reorder.
+        qxyzw = R.from_euler("xyz", [rx, ry, rz], degrees=False).as_quat()
+        quat = np.array([qxyzw[3], qxyzw[0], qxyzw[1], qxyzw[2]], dtype=np.float64)
 
         assert self._env is not None
         robot = self._env.task.robot
         site_name = robot.end_effector_site.full_identifier
 
-        # Important: inplace=False so IK doesn't mutate physics state mid-step;
-        # we only want the solved qpos. Fetch a fresh physics handle — caching
-        # it can yield a stale weakref after a reset.
+        # inplace=False so IK doesn't mutate physics state mid-step — we only
+        # want the solved qpos. Fetch a fresh physics handle — caching it can
+        # yield a stale weakref after a reset.
         ik_result = qpos_from_site_pose(
             self._env.physics,
             site_name=site_name,
-            target_pos=pos,
+            target_pos=pos_world,
             target_quat=quat,
             inplace=False,
             max_steps=100,
@@ -386,11 +420,10 @@ class VLABenchEnv(gym.Env):
         n_dof = robot.n_dof  # 7 for Franka
         arm_qpos = ik_result.qpos[:n_dof]
 
-        # Gripper: action scalar in [0, 1] (0=open, 1=closed). Map linearly to
-        # finger qpos in [CLOSED, OPEN]. Franka has 2 mirrored fingers.
-        finger_qpos = self._FRANKA_FINGER_OPEN + gripper * (
-            self._FRANKA_FINGER_CLOSED - self._FRANKA_FINGER_OPEN
-        )
+        # Dataset gripper convention: 1 = open (finger qpos = 0.04),
+        # 0 = closed (finger qpos = 0.0). See VLABench/scripts/convert_to_lerobot.py
+        # where `trajectory[i][-1] > 0.03` is encoded as `1`.
+        finger_qpos = gripper * self._FRANKA_FINGER_OPEN
 
         ctrl = np.zeros(ctrl_dim, dtype=np.float64)
         ctrl[:n_dof] = arm_qpos
