@@ -356,7 +356,7 @@ def test_learner_algorithm_wiring():
             }
 
     stats = algorithm.update(batch_iterator())
-    assert "critic" in stats.losses
+    assert "loss_critic" in stats.losses
 
     # get_weights -> state_to_bytes round-trip
     weights = algorithm.get_weights()
@@ -393,7 +393,7 @@ def test_learner_algorithm_wiring():
         batch_size=batch_size,
     )
     trainer_stats = trainer.training_step()
-    assert "critic" in trainer_stats.losses
+    assert "loss_critic" in trainer_stats.losses
 
 
 def test_initial_and_periodic_weight_push_consistency():
