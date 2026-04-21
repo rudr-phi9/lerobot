@@ -16,12 +16,14 @@ import abc
 import builtins
 import logging
 import os
+from importlib.resources import files
 from pathlib import Path
-from typing import Any, TypeVar
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import packaging
 import safetensors
-from huggingface_hub import hf_hub_download
+from huggingface_hub import HfApi, ModelCard, ModelCardData, hf_hub_download
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from huggingface_hub.errors import HfHubHTTPError
 from safetensors.torch import load_model as load_model_as_safetensor, save_model as save_model_as_safetensor
@@ -30,7 +32,8 @@ from torch import Tensor, nn
 from lerobot.configs.rewards import RewardModelConfig
 from lerobot.utils.hub import HubMixin
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from lerobot.configs.train import TrainPipelineConfig
 
 T = TypeVar("T", bound="PreTrainedRewardModel")
 
@@ -61,7 +64,7 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
     def _save_pretrained(self, save_directory: Path) -> None:
         self.config._save_pretrained(save_directory)
         model_to_save = self.module if hasattr(self, "module") else self
-        save_model_as_safetensor(model_to_save, str(Path(save_directory) / SAFETENSORS_SINGLE_FILE))
+        save_model_as_safetensor(model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE))
 
     @classmethod
     def from_pretrained(
@@ -79,6 +82,10 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
         strict: bool = False,
         **kwargs,
     ) -> T:
+        """
+        The reward model is set in evaluation mode by default using `reward.eval()` (dropout modules are
+        deactivated). To train it, you should first set it back in training mode with `reward.train()`.
+        """
         if config is None:
             config = RewardModelConfig.from_pretrained(
                 pretrained_name_or_path=pretrained_name_or_path,
@@ -94,7 +101,7 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
         model_id = str(pretrained_name_or_path)
         instance = cls(config, **kwargs)
         if os.path.isdir(model_id):
-            logger.info("Loading reward model weights from local directory")
+            print("Loading weights from local directory")
             model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
             reward = cls._load_as_safetensor(instance, model_file, config.device or "cpu", strict)
         else:
@@ -123,7 +130,7 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
     @classmethod
     def _load_as_safetensor(cls, model: T, model_file: str, map_location: str, strict: bool) -> T:
         # Create base kwargs
-        kwargs: dict[str, Any] = {"strict": strict}
+        kwargs = {"strict": strict}
 
         # Add device parameter for newer versions that support it
         if packaging.version.parse(safetensors.__version__) >= packaging.version.parse("0.4.3"):
@@ -131,11 +138,10 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
 
         # Load the model with appropriate kwargs
         missing_keys, unexpected_keys = load_model_as_safetensor(model, model_file, **kwargs)
-
         if missing_keys:
-            logger.warning(f"Missing keys when loading reward model: {missing_keys}")
+            logging.warning(f"Missing key(s) when loading model: {missing_keys}")
         if unexpected_keys:
-            logger.warning(f"Unexpected keys when loading reward model: {unexpected_keys}")
+            logging.warning(f"Unexpected key(s) when loading model: {unexpected_keys}")
 
         # For older versions, manually move to device if needed
         if "device" not in kwargs and map_location != "cpu":
@@ -148,15 +154,15 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
             model.to(map_location)
         return model
 
-    def reset(self) -> None:
-        """Reset any internal state."""
-        pass
-
     def get_optim_params(self):
         """
         Returns the reward-model-specific parameters dict to be passed on to the optimizer.
         """
         return self.parameters()
+
+    def reset(self) -> None:
+        """Reset any internal state."""
+        pass
 
     @abc.abstractmethod
     def compute_reward(self, batch: dict[str, Tensor]) -> Tensor:
@@ -176,3 +182,63 @@ class PreTrainedRewardModel(nn.Module, HubMixin, abc.ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} is not trainable. Only use compute_reward() for inference."
         )
+
+    @property
+    def is_trainable(self) -> bool:
+        """Whether this reward model can be trained via ``lerobot-train``.
+
+        Trainable reward models override :meth:`forward`; zero-shot models
+        inherit the base implementation that raises ``NotImplementedError``.
+        """
+        return type(self).forward is not PreTrainedRewardModel.forward
+
+    def push_model_to_hub(self, cfg: "TrainPipelineConfig"):
+        api = HfApi()
+        repo_id = api.create_repo(
+            repo_id=self.config.repo_id, private=self.config.private, exist_ok=True
+        ).repo_id
+
+        # Push the files to the repo in a single commit
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            saved_path = Path(tmp) / repo_id
+
+            self.save_pretrained(saved_path)  # Calls _save_pretrained and stores model tensors
+
+            card = self.generate_model_card(
+                cfg.dataset.repo_id, self.config.type, self.config.license, self.config.tags
+            )
+            card.save(str(saved_path / "README.md"))
+
+            cfg.save_pretrained(saved_path)  # Calls _save_pretrained and stores train config
+
+            commit_info = api.upload_folder(
+                repo_id=repo_id,
+                repo_type="model",
+                folder_path=saved_path,
+                commit_message="Upload reward model weights, train config and readme",
+                allow_patterns=["*.safetensors", "*.json", "*.yaml", "*.md"],
+                ignore_patterns=["*.tmp", "*.log"],
+            )
+
+            logging.info(f"Model pushed to {commit_info.repo_url.url}")
+
+    def generate_model_card(
+        self, dataset_repo_id: str, model_type: str, license: str | None, tags: list[str] | None
+    ) -> ModelCard:
+        card_data = ModelCardData(
+            license=license or "apache-2.0",
+            library_name="lerobot",
+            pipeline_tag="robotics",
+            tags=list(set(tags or []).union({"robotics", "lerobot", "reward-model", model_type})),
+            model_name=model_type,
+            datasets=dataset_repo_id,
+        )
+
+        template_card = (
+            files("lerobot.templates")
+            .joinpath("lerobot_rewardmodel_modelcard_template.md")
+            .read_text(encoding="utf-8")
+        )
+        card = ModelCard.from_template(card_data, template_str=template_card)
+        card.validate()
+        return card
