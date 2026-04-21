@@ -54,6 +54,10 @@ echo ""
     --teleop.type=bi_so_leader \
     --teleop.id=bimanual \
     --teleop.calibration_dir="$CALIB_DIR/teleoperators" \
-    --teleop.left_arm_config.port="$BLACK_LEADER_PORT" \
-    --teleop.right_arm_config.port="$RED_LEADER_PORT" \
+    --teleop.left_arm_config.port="$RED_LEADER_PORT" \
+    --teleop.left_arm_config.auto_apply_calibration=true \
+    --teleop.right_arm_config.port="$BLACK_LEADER_PORT" \
+    --teleop.right_arm_config.auto_apply_calibration=true \
+    --robot.left_arm_config.auto_apply_calibration=true \
+    --robot.right_arm_config.auto_apply_calibration=true \
     $DISPLAY_FLAG

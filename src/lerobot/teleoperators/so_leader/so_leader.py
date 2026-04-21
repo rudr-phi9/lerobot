@@ -83,6 +83,10 @@ class SOLeader(Teleoperator):
 
     def calibrate(self) -> None:
         if self.calibration:
+            if self.config.auto_apply_calibration:
+                logger.info(f"Auto-applying calibration file for {self.id}")
+                self.bus.write_calibration(self.calibration)
+                return
             # Calibration file exists, ask user whether to use it or run new calibration
             user_input = input(
                 f"Press ENTER to use provided calibration file associated with the id {self.id}, or type 'c' and press ENTER to run calibration: "

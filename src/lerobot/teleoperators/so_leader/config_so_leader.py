@@ -29,6 +29,9 @@ class SOLeaderConfig:
     # Whether to use degrees for angles
     use_degrees: bool = True
 
+    # When True, automatically apply the calibration file without interactive prompt
+    auto_apply_calibration: bool = False
+
 
 @TeleoperatorConfig.register_subclass("so101_leader")
 @TeleoperatorConfig.register_subclass("so100_leader")
